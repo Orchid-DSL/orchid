@@ -14,6 +14,7 @@ import {
 } from './values';
 import { OrchidProvider, TagInfo } from './provider';
 import { BUILTIN_MACROS, META_OPERATIONS } from './builtins';
+import { MCPManager } from './mcp-manager';
 
 /** Sentinel thrown to implement return statements. */
 class ReturnSignal {
@@ -38,10 +39,13 @@ export class OrchidError extends Error {
 export interface InterpreterOptions {
   provider: OrchidProvider;
   trace?: boolean;
+  /** Optional MCP manager for real tool connections. */
+  mcpManager?: MCPManager;
 }
 
 export class Interpreter {
   private provider: OrchidProvider;
+  private mcpManager?: MCPManager;
   private globalEnv: Environment;
   private implicitContext: OrchidValue = orchidNull();
   private checkpoints: Map<string, { env: Map<string, OrchidValue>; context: OrchidValue }> = new Map();
@@ -56,6 +60,7 @@ export class Interpreter {
 
   constructor(options: InterpreterOptions) {
     this.provider = options.provider;
+    this.mcpManager = options.mcpManager;
     this.globalEnv = new Environment();
     this.traceEnabled = options.trace ?? false;
   }
@@ -401,6 +406,14 @@ export class Interpreter {
       args[arg.name || `arg${Object.keys(args).length}`] = val;
     }
 
+    // Route to MCPManager if the namespace is a connected MCP server
+    if (this.mcpManager?.hasServer(node.namespace)) {
+      const result = await this.mcpManager.callTool(node.namespace, node.name, args);
+      this.implicitContext = result;
+      return result;
+    }
+
+    // Fallback to provider for non-MCP namespaces
     const result = await this.provider.toolCall(node.namespace, node.name, args, tags);
     this.implicitContext = result;
     return result;
@@ -844,9 +857,35 @@ export class Interpreter {
   private async executeUse(node: AST.UseStatement): Promise<OrchidValue> {
     const alias = node.alias || node.name.replace(/-/g, '_');
     this.namespaces.set(alias, node.name);
-    if (this.traceEnabled) {
+
+    // If it's an MCP server and we have a manager, connect to it
+    if (node.kind === 'MCP' && this.mcpManager) {
+      try {
+        await this.mcpManager.connect(node.name);
+        // Also register the alias so namespace:Operation() routes correctly
+        if (alias !== node.name) {
+          // The MCPManager stores by the original name; we need the alias
+          // to resolve too. Re-register under the alias if different.
+          await this.mcpManager.connect(alias).catch(() => {
+            // Alias may not be in config — that's fine, we'll use the
+            // original name. Register a namespace mapping instead.
+          });
+        }
+        if (this.traceEnabled) {
+          const tools = this.mcpManager.getTools(node.name);
+          this.trace(`Connected MCP server "${node.name}" as "${alias}" (${tools.length} tools)`);
+        }
+      } catch (error) {
+        if (this.traceEnabled) {
+          this.trace(`MCP server "${node.name}" not configured — will use provider fallback`);
+        }
+        // Not a fatal error: the namespace is still registered so
+        // provider.toolCall() will handle it as a simulated call
+      }
+    } else if (this.traceEnabled) {
       this.trace(`Loaded ${node.kind}: ${node.name} as ${alias}`);
     }
+
     return orchidNull();
   }
 

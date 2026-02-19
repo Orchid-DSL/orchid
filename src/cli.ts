@@ -8,6 +8,8 @@ import { Interpreter } from './runtime/interpreter';
 import { ConsoleProvider, OrchidProvider } from './runtime/provider';
 import { ClaudeProvider } from './runtime/claude-provider';
 import { SandboxProvider } from './runtime/sandbox-provider';
+import { MCPManager } from './runtime/mcp-manager';
+import { loadConfigForScript } from './runtime/config';
 import { valueToString, OrchidValue } from './runtime/values';
 
 const USAGE = `
@@ -30,6 +32,11 @@ Other Options:
   --trace    Enable execution tracing
   --parse    Parse only (print AST as JSON)
   --lex      Tokenize only (print token stream)
+  --config <path>             Path to orchid.config.json (auto-detected by default)
+
+MCP Configuration:
+  Create an orchid.config.json in your project directory to configure MCP servers.
+  See orchid.config.example.json for the format.
 
 Examples:
   orchid examples/hello_world.orch
@@ -102,7 +109,7 @@ async function main(): Promise<void> {
 
   const flags = new Set(args.filter(a => a.startsWith('--')));
   // Files are args that don't start with -- and aren't values for flags
-  const flagsWithValues = new Set(['--provider', '--model', '--max-requests']);
+  const flagsWithValues = new Set(['--provider', '--model', '--max-requests', '--config']);
   const files: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
@@ -159,15 +166,30 @@ async function main(): Promise<void> {
   }
 
   // Full execution
+  let mcpManager: MCPManager | undefined;
+
   try {
     const lexer = new Lexer(source);
     const tokens = lexer.tokenize();
     const parser = new Parser();
     const ast = parser.parse(tokens);
     const provider = createProvider(args);
+    const traceEnabled = flags.has('--trace');
+
+    // Load MCP configuration
+    const config = loadConfigForScript(filePath);
+    if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
+      mcpManager = new MCPManager(config, { trace: traceEnabled });
+      if (traceEnabled) {
+        const serverNames = Object.keys(config.mcpServers).join(', ');
+        console.log(`  [mcp] Config loaded: ${serverNames}`);
+      }
+    }
+
     const interpreter = new Interpreter({
       provider,
-      trace: flags.has('--trace'),
+      trace: traceEnabled,
+      mcpManager,
     });
 
     const result = await interpreter.run(ast);
@@ -180,6 +202,11 @@ async function main(): Promise<void> {
       console.error(e.stack);
     }
     process.exit(1);
+  } finally {
+    // Always clean up MCP connections
+    if (mcpManager) {
+      await mcpManager.disconnectAll();
+    }
   }
 }
 

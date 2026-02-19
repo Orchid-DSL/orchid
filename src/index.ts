@@ -25,6 +25,8 @@ export {
 export { OrchidProvider, ConsoleProvider, TagInfo } from './runtime/provider';
 export { ClaudeProvider, ClaudeProviderOptions } from './runtime/claude-provider';
 export { SandboxProvider, SandboxLimits, SandboxUsage, SandboxError } from './runtime/sandbox-provider';
+export { MCPManager, MCPServerConfig, OrchidConfig, MCPToolInfo, MCPError } from './runtime/mcp-manager';
+export { loadConfig, loadConfigForScript } from './runtime/config';
 export { BUILTIN_MACROS, META_OPERATIONS, describeBuiltin } from './runtime/builtins';
 
 import { Lexer } from './lexer/lexer';
