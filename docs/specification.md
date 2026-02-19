@@ -587,27 +587,79 @@ else:
 
 ## 9. MCP and Plugin Integration
 
-### 9.1 Importing Tools
+Orchid has two mechanisms for extending functionality beyond the core language:
+
+- **MCP** — connects to external tool servers that speak the Model Context Protocol. These are running processes (databases, APIs, file systems) that provide tools over a transport layer. Think of MCP as *infrastructure integration*.
+- **Plugin** — imports reusable Orchid code packages (`.orch` files or directories) as namespaced modules. Plugins bundle agents, macros, and functions into a `namespace:Operation()` interface. Think of Plugins as *Orchid-native libraries*.
+
+The key difference: `import` merges bindings into the current scope, while `Use Plugin` keeps everything namespaced — `scraper:Extract(...)` instead of a bare `Extract(...)` call. Plugins can also declare their own MCP dependencies and permissions.
+
+### 9.1 Importing MCP Servers
 
 ```orchid
 Use MCP("filesystem") as fs
 Use MCP("postgres")
 Use MCP("slack")
-Use Plugin("web-scraper@~1.3")
 ```
 
-### 9.2 Tool Invocation
+MCP servers are configured in `orchid.config.json` and connected at runtime. If a server is not configured, the runtime warns and falls back to simulated calls.
 
-Tools use `namespace:operation` syntax.
+### 9.2 Importing Plugins
+
+```orchid
+Use Plugin("web-scraper") as scraper
+Use Plugin("sentiment-analysis@~2.0")
+```
+
+A plugin is an `.orch` file (or directory with an `index.orch`) that exports agents, macros, and functions. The runtime resolves plugins from:
+
+1. A `plugins/` directory relative to the script
+2. Paths listed in the `ORCHID_PLUGIN_PATH` environment variable
+
+Plugins are executed in isolation and their exported bindings are exposed through the namespace. Version constraints (e.g., `@~2.0`) are recorded for dependency tracking but not enforced by the runtime in v0.1.
+
+**Example plugin file** (`plugins/web-scraper.orch`):
+```orchid
+@orchid 0.1
+@name "Web Scraper Plugin"
+@description "Provides web scraping utilities as namespaced operations"
+
+agent Extract(url, selector):
+    """Extracts content from a web page matching the given selector."""
+    page := fetch(url)
+    result := CoT("Extract elements matching '$selector' from: $page")
+    return result
+
+macro Summarize(url):
+    """Fetches a URL and returns a summary."""
+    content := Extract($url, "body")
+    -> CoT("Summarize this content concisely")
+
+clean := fn(html):
+    return html.strip()
+```
+
+**Using the plugin:**
+```orchid
+Use Plugin("web-scraper") as scraper
+
+headlines := scraper:Extract("https://example.com", "h1")
+summary := scraper:Summarize("https://example.com")
+```
+
+### 9.3 Tool Invocation
+
+Both MCP servers and Plugins use the same `namespace:operation` syntax for invocation.
 
 ```orchid
 data := fs:Read("/data/report.csv")
 analysis := CoT(data)
 postgres:Write("INSERT INTO reports VALUES ($analysis)")
 slack:Send("#team", "Analysis complete: $analysis")
+scraper:Extract("https://example.com", "headlines")
 ```
 
-### 9.3 Tool Discovery
+### 9.4 Tool Discovery
 
 ```orchid
 available := Discover("MCP.*")
@@ -618,15 +670,19 @@ else:
     Error("database_unavailable")
 ```
 
-### 9.4 Dynamic Tool Loading
+### 9.5 Dynamic Tool Loading
 
 ```orchid
 if need_weather:
     Use MCP("weather-api")
     forecast := weather_api:Forecast(zip=90210)
+
+if need_scraping:
+    Use Plugin("web-scraper") as scraper
+    data := scraper:Extract(url, "main")
 ```
 
-### 9.5 Tool Permissions
+### 9.6 Tool Permissions
 
 ```orchid
 # Declare required permissions upfront
@@ -870,7 +926,7 @@ The `@` prefix denotes file-level metadata declarations. These must appear at th
 @name "Stock Analysis Pipeline"
 @author "Mike"
 @description "Automated financial analysis with confidence gating"
-@requires MCP("financial-data"), MCP("filesystem")
+@requires MCP("financial-data"), MCP("filesystem"), Plugin("sentiment-analysis")
 ```
 
 ### 13.3 Imports and Composability

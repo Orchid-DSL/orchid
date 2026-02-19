@@ -49,6 +49,14 @@ export interface InterpreterOptions {
   scriptDir?: string;
 }
 
+/** A loaded Plugin module — an isolated Orchid interpreter with its own macros, agents, and bindings. */
+interface PluginModule {
+  interpreter: Interpreter;
+  macros: Map<string, AST.MacroDef>;
+  agents: Map<string, AST.AgentDef>;
+  env: Environment;
+}
+
 export class Interpreter {
   private provider: OrchidProvider;
   private mcpManager?: MCPManager;
@@ -65,6 +73,7 @@ export class Interpreter {
   private agents: Map<string, AST.AgentDef> = new Map();
   private scriptDir: string;
   private importCache: Map<string, Environment> = new Map();
+  private plugins: Map<string, PluginModule> = new Map(); // alias -> loaded plugin
 
   constructor(options: InterpreterOptions) {
     this.provider = options.provider;
@@ -409,6 +418,13 @@ export class Interpreter {
 
   private async executeNamespacedOperation(node: AST.NamespacedOperation, env: Environment): Promise<OrchidValue> {
     const tags = this.resolveTags(node.tags, env);
+
+    // Route to loaded Plugin if the namespace matches
+    const plugin = this.plugins.get(node.namespace);
+    if (plugin) {
+      return this.dispatchPluginCall(plugin, node, env);
+    }
+
     const args: Record<string, OrchidValue> = {};
     for (const arg of node.args) {
       const val = await this.evaluate(arg.value, env);
@@ -426,6 +442,61 @@ export class Interpreter {
     const result = await this.provider.toolCall(node.namespace, node.name, args, tags);
     this.implicitContext = result;
     return result;
+  }
+
+  /**
+   * Dispatch a namespace:Operation() call to a loaded Plugin module.
+   * Looks for a matching agent or macro in the plugin, then calls it
+   * using the plugin's own interpreter so it runs in the plugin's scope.
+   */
+  private async dispatchPluginCall(
+    plugin: PluginModule,
+    node: AST.NamespacedOperation,
+    callerEnv: Environment,
+  ): Promise<OrchidValue> {
+    const opName = node.name;
+
+    // Check for agent first, then macro
+    if (plugin.agents.has(opName)) {
+      const result = await plugin.interpreter.callAgent(
+        plugin.agents.get(opName)!,
+        node.args,
+        this.resolveTags(node.tags, callerEnv),
+        callerEnv,
+      );
+      this.implicitContext = result;
+      return result;
+    }
+
+    if (plugin.macros.has(opName)) {
+      const result = await plugin.interpreter.callMacro(
+        plugin.macros.get(opName)!,
+        node.args,
+        this.resolveTags(node.tags, callerEnv),
+        callerEnv,
+      );
+      this.implicitContext = result;
+      return result;
+    }
+
+    // Check for a callable function in the plugin's environment
+    const binding = plugin.env.get(opName);
+    if (binding.kind === 'callable') {
+      const result = await plugin.interpreter.callCallable(
+        binding,
+        node.args,
+        this.resolveTags(node.tags, callerEnv),
+        callerEnv,
+      );
+      this.implicitContext = result;
+      return result;
+    }
+
+    throw new OrchidError(
+      'ToolNotFound',
+      `Plugin "${node.namespace}" has no operation "${opName}"`,
+      node.position,
+    );
   }
 
   // ─── Control Flow ──────────────────────────────────────
@@ -864,11 +935,17 @@ export class Interpreter {
   // ─── Use / Import ──────────────────────────────────────
 
   private async executeUse(node: AST.UseStatement): Promise<OrchidValue> {
-    const alias = node.alias || node.name.replace(/-/g, '_');
-    this.namespaces.set(alias, node.name);
+    // Strip version constraint from plugin names (e.g., "web-scraper@~1.3" → "web-scraper")
+    const rawName = node.name.replace(/@[^@]+$/, '');
+    const alias = node.alias || rawName.replace(/-/g, '_');
+    this.namespaces.set(alias, rawName);
+
+    if (node.kind === 'Plugin') {
+      return this.loadPlugin(rawName, alias, node.position);
+    }
 
     // If it's an MCP server and we have a manager, connect to it
-    if (node.kind === 'MCP' && this.mcpManager) {
+    if (this.mcpManager) {
       try {
         await this.mcpManager.connect(node.name);
         // Also register the alias so namespace:Operation() routes correctly
@@ -893,17 +970,114 @@ export class Interpreter {
         // Not a fatal error: the namespace is still registered so
         // provider.toolCall() will handle it as a simulated call
       }
-    } else if (node.kind === 'MCP' && !this.mcpManager) {
+    } else {
       // No MCP manager at all — no orchid.config.json
       console.warn(
         `[warn] MCP server "${node.name}" is not configured (no orchid.config.json found).\n` +
         `       To install it, run: orchid mcp install ${node.name}`,
       );
-    } else if (this.traceEnabled) {
-      this.trace(`Loaded ${node.kind}: ${node.name} as ${alias}`);
     }
 
     return orchidNull();
+  }
+
+  /**
+   * Load a Plugin — an .orch file resolved from plugins/ or ORCHID_PLUGIN_PATH.
+   * The plugin is parsed and executed in isolation; its exported agents, macros,
+   * and functions are exposed through the namespace (alias:Operation).
+   */
+  private async loadPlugin(name: string, alias: string, position?: AST.Position): Promise<OrchidValue> {
+    // Resolve the plugin file
+    const pluginPath = this.resolvePluginPath(name);
+    if (!pluginPath) {
+      throw new OrchidError(
+        'ToolNotFound',
+        `Plugin "${name}" not found. Searched in plugins/ directory and ORCHID_PLUGIN_PATH.`,
+        position,
+      );
+    }
+
+    const source = fs.readFileSync(pluginPath, 'utf-8');
+
+    let ast: AST.Program;
+    try {
+      const lexer = new Lexer(source);
+      const tokens = lexer.tokenize();
+      const parser = new Parser();
+      ast = parser.parse(tokens);
+    } catch (e: any) {
+      throw new OrchidError(
+        'ToolNotFound',
+        `Failed to parse plugin "${name}": ${e.message}`,
+        position,
+      );
+    }
+
+    // Execute the plugin in an isolated interpreter
+    const pluginInterpreter = new Interpreter({
+      provider: this.provider,
+      trace: this.traceEnabled,
+      mcpManager: this.mcpManager,
+      scriptDir: path.dirname(pluginPath),
+    });
+
+    try {
+      await pluginInterpreter.run(ast);
+    } catch (e: any) {
+      throw new OrchidError(
+        'ToolNotFound',
+        `Error loading plugin "${name}": ${e.message}`,
+        position,
+      );
+    }
+
+    // Store the plugin module for namespace dispatch
+    this.plugins.set(alias, {
+      interpreter: pluginInterpreter,
+      macros: pluginInterpreter.macros,
+      agents: pluginInterpreter.agents,
+      env: pluginInterpreter.globalEnv,
+    });
+
+    if (this.traceEnabled) {
+      const ops = pluginInterpreter.macros.size + pluginInterpreter.agents.size;
+      this.trace(`Loaded Plugin "${name}" as "${alias}" (${ops} operations)`);
+    }
+
+    return orchidNull();
+  }
+
+  /**
+   * Resolve a plugin name to a file path by searching:
+   * 1. plugins/<name>.orch relative to the script directory
+   * 2. plugins/<name>/index.orch relative to the script directory
+   * 3. Each directory in ORCHID_PLUGIN_PATH (colon-separated)
+   */
+  private resolvePluginPath(name: string): string | null {
+    const candidates: string[] = [];
+
+    // Search relative to script directory
+    candidates.push(path.resolve(this.scriptDir, 'plugins', `${name}.orch`));
+    candidates.push(path.resolve(this.scriptDir, 'plugins', name, 'index.orch'));
+
+    // Search ORCHID_PLUGIN_PATH
+    const pluginPath = process.env.ORCHID_PLUGIN_PATH;
+    if (pluginPath) {
+      for (const dir of pluginPath.split(path.delimiter)) {
+        if (dir) {
+          candidates.push(path.resolve(dir, `${name}.orch`));
+          candidates.push(path.resolve(dir, name, 'index.orch'));
+        }
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
   private async executeImport(node: AST.ImportStatement): Promise<OrchidValue> {
