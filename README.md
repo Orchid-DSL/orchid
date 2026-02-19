@@ -8,7 +8,7 @@
 
 ---
 
-Orchid is a lightweight, composable language for describing *how AI agents should think* — not just what they should compute. It bridges the gap between natural language prompts and procedural code, giving you human-readable scripts that are machine-executable.
+Orchid is a lightweight, composable language for describing *how AI agents should think* - not just what they should compute. It bridges the gap between natural language prompts and procedural code, giving you human-readable scripts that are machine-executable.
 
 ```orchid
 @orchid 0.1
@@ -33,7 +33,7 @@ Read it aloud. You don't need to be a programmer to understand what this agent w
 
 **The problem:** We're orchestrating increasingly sophisticated AI agents using either raw prompts (fragile, non-composable) or general-purpose programming languages (verbose, obscures intent). A product manager can't review a LangChain pipeline. A researcher can't reproduce a prompt chain from a Python script.
 
-**The approach:** Orchid treats reasoning as a first-class primitive. Instead of writing code *about* API calls, you write scripts *about* cognition — with named reasoning strategies, confidence-aware control flow, and parallel execution built into the syntax.
+**The approach:** Orchid treats reasoning as a first-class primitive. Instead of writing code *about* API calls, you write scripts *about* cognition - with named reasoning strategies, confidence-aware control flow, and parallel execution built into the syntax.
 
 | Feature | Orchid | Python + LangChain | YAML Configs | DSPy |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@ Read it aloud. You don't need to be a programmer to understand what this agent w
 ## Key Concepts
 
 ### Reasoning Macros
-Named cognitive operations that shape *how* an agent thinks. Not functions that transform data — patterns of thought.
+Named cognitive operations that shape *how* an agent thinks. Not functions that transform data - patterns of thought.
 
 ```orchid
 CoT("analyze market trends")          # chain-of-thought deliberation
@@ -60,7 +60,7 @@ Debate[3]("should we expand to EU?")  # 3-perspective argumentation
 ```
 
 ### Confidence-Aware Control Flow
-Agent operations don't just succeed or fail — they exist on a spectrum. Orchid makes uncertainty a native concept.
+Agent operations don't just succeed or fail - they exist on a spectrum. Orchid makes uncertainty a native concept.
 
 ```orchid
 while Confidence() < 0.7:
@@ -149,10 +149,10 @@ Orchid is in **early draft** (v0.1.0). The language design is stabilizing but no
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. The most valuable contributions right now:
 
-- **Feedback on the spec** — Does the syntax make sense? What's confusing?
-- **Real-world use cases** — What workflows would you write in Orchid?
-- **Runtime implementations** — Build an interpreter in your language of choice
-- **Tooling** — Syntax highlighting, linters, formatters
+- **Feedback on the spec** - Does the syntax make sense? What's confusing?
+- **Real-world use cases** - What workflows would you write in Orchid?
+- **Runtime implementations** - Build an interpreter in your language of choice
+- **Tooling** - Syntax highlighting, linters, formatters
 
 ## License
 
