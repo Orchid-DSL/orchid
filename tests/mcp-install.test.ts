@@ -253,7 +253,7 @@ describe('orchid mcp CLI', () => {
     expect(stdout).toContain('filesystem');
     expect(stdout).toContain('memory');
     expect(stdout).toContain('brave-search');
-    expect(stdout).toContain('Available MCP servers');
+    expect(stdout).toContain('Built-in MCP servers');
   });
 
   it('should search the registry', async () => {

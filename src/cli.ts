@@ -17,6 +17,15 @@ import {
   parseRequiredServers,
 } from './runtime/mcp-install';
 import { listRegistry, searchRegistry } from './runtime/mcp-registry';
+import {
+  searchNpm,
+  fetchCatalog,
+  saveCache,
+  loadCache,
+  searchCache,
+  deriveServerName,
+  NpmPackageResult,
+} from './runtime/mcp-remote-registry';
 
 const USAGE = `
 orchid - The Orchid Language Runtime v0.1.0
@@ -27,8 +36,9 @@ Usage:
   orchid --lex <file.orch>    Tokenize and print tokens
   orchid mcp install <name>   Install an MCP server into orchid.config.json
   orchid mcp install <file>   Install all MCP servers required by a script
-  orchid mcp list             List available MCP servers
-  orchid mcp search <query>   Search the MCP server registry
+  orchid mcp list             List built-in MCP servers
+  orchid mcp search <query>   Search built-in registry + npm for MCP servers
+  orchid mcp update           Fetch latest MCP server catalog from npm
   orchid --help               Show this help message
 
 Provider Options:
@@ -116,7 +126,7 @@ function createProvider(args: string[]): OrchidProvider {
   return provider;
 }
 
-function handleMcpCommand(args: string[]): void {
+async function handleMcpCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
 
   if (!subcommand || subcommand === 'help') {
@@ -126,27 +136,51 @@ orchid mcp — Manage MCP servers
 Commands:
   orchid mcp install <name...>   Install MCP servers by name
   orchid mcp install <file.orch> Install all servers required by a script
-  orchid mcp list                List all available servers in the registry
-  orchid mcp search <query>      Search the registry
+  orchid mcp list                List built-in servers
+  orchid mcp search <query>      Search built-in + npm for MCP servers
+  orchid mcp update              Fetch latest MCP server catalog from npm
 
 Examples:
   orchid mcp install filesystem
   orchid mcp install filesystem brave-search memory
   orchid mcp install examples/financial_analysis.orch
-  orchid mcp list
   orchid mcp search database
+  orchid mcp search puppeteer
+  orchid mcp update
 `);
     return;
   }
 
   if (subcommand === 'list') {
     const entries = listRegistry();
-    console.log(`\nAvailable MCP servers (${entries.length}):\n`);
+    console.log(`\nBuilt-in MCP servers (${entries.length}):\n`);
     const nameWidth = Math.max(...entries.map(e => e.name.length));
     for (const { name, entry } of entries) {
       console.log(`  ${name.padEnd(nameWidth + 2)} ${entry.description}`);
     }
-    console.log(`\nInstall with: orchid mcp install <name>`);
+
+    // Show cached npm count if available
+    const cached = loadCache();
+    if (cached) {
+      console.log(`\n  + ${cached.length} more from npm (run "orchid mcp search <query>" to find them)`);
+    } else {
+      console.log(`\nRun "orchid mcp update" to fetch the full catalog from npm.`);
+    }
+    console.log(`Install with: orchid mcp install <name>`);
+    return;
+  }
+
+  if (subcommand === 'update') {
+    console.log('Fetching MCP server catalog from npm...');
+    try {
+      const packages = await fetchCatalog();
+      saveCache(packages);
+      console.log(`Updated: ${packages.length} MCP server packages indexed.`);
+      console.log(`Run "orchid mcp search <query>" to find servers.`);
+    } catch (error) {
+      console.error(`Failed to fetch catalog: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
     return;
   }
 
@@ -156,17 +190,54 @@ Examples:
       console.error('Usage: orchid mcp search <query>');
       process.exit(1);
     }
-    const results = searchRegistry(query);
-    if (results.length === 0) {
+
+    // 1. Search built-in registry first
+    const builtinResults = searchRegistry(query);
+
+    // 2. Search npm (live query + local cache)
+    let npmResults: NpmPackageResult[] = [];
+    const builtinNames = new Set(builtinResults.map(r => r.entry.package));
+    try {
+      npmResults = await searchNpm(query);
+      // Deduplicate: remove npm results that are already in built-in
+      npmResults = npmResults.filter(pkg => !builtinNames.has(pkg.name));
+    } catch {
+      // Live search failed — try local cache
+      const cached = loadCache();
+      if (cached) {
+        npmResults = searchCache(query, cached)
+          .filter(pkg => !builtinNames.has(pkg.name));
+      }
+    }
+
+    if (builtinResults.length === 0 && npmResults.length === 0) {
       console.log(`No MCP servers found matching "${query}".`);
-      console.log(`Run "orchid mcp list" to see all available servers.`);
+      console.log(`Try "orchid mcp update" to refresh the catalog, or "orchid mcp list" to see built-in servers.`);
       return;
     }
-    console.log(`\nMCP servers matching "${query}":\n`);
-    const nameWidth = Math.max(...results.map(r => r.name.length));
-    for (const { name, entry } of results) {
-      console.log(`  ${name.padEnd(nameWidth + 2)} ${entry.description}`);
+
+    // Print built-in results
+    if (builtinResults.length > 0) {
+      console.log(`\nBuilt-in servers matching "${query}":\n`);
+      const nameWidth = Math.max(...builtinResults.map(r => r.name.length));
+      for (const { name, entry } of builtinResults) {
+        console.log(`  ${name.padEnd(nameWidth + 2)} ${entry.description}`);
+      }
     }
+
+    // Print npm results
+    if (npmResults.length > 0) {
+      console.log(`\nnpm packages matching "${query}":\n`);
+      const nameWidth = Math.max(...npmResults.map(r => r.name.length), 20);
+      for (const pkg of npmResults) {
+        const desc = pkg.description.length > 60
+          ? pkg.description.slice(0, 57) + '...'
+          : pkg.description;
+        console.log(`  ${pkg.name.padEnd(nameWidth + 2)} ${desc}`);
+      }
+    }
+
+    console.log(`\nInstall with: orchid mcp install <name>`);
     return;
   }
 
@@ -217,7 +288,7 @@ async function main(): Promise<void> {
 
   // ─── MCP Subcommands ──────────────────────────────────
   if (args[0] === 'mcp') {
-    handleMcpCommand(args.slice(1));
+    await handleMcpCommand(args.slice(1));
     return;
   }
 

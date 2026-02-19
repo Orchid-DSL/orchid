@@ -30,6 +30,7 @@ export { loadConfig, loadConfigForScript } from './runtime/config';
 export { BUILTIN_MACROS, META_OPERATIONS, describeBuiltin } from './runtime/builtins';
 export { MCP_REGISTRY, lookupServer, searchRegistry, listRegistry, RegistryEntry } from './runtime/mcp-registry';
 export { installServer, installFromScript, parseRequiredServers, InstallResult } from './runtime/mcp-install';
+export { searchNpm, fetchCatalog, saveCache, loadCache, searchCache, deriveServerName, NpmPackageResult } from './runtime/mcp-remote-registry';
 
 import { Lexer } from './lexer/lexer';
 import { Parser } from './parser/parser';
