@@ -18,7 +18,7 @@ sources := fork:
     academic: Search("quantum computing breakthroughs 2024")
     industry: Search("quantum computing commercial applications")
 
-vetted := CoVe(sources)                           # verify claims against evidence
+vetted := CoVe(sources)                            # verify claims against evidence
 analysis := CoT(vetted)<deep>                      # chain-of-thought reasoning
 
 if Confidence(analysis) > 0.7:
