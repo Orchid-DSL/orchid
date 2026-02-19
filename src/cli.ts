@@ -11,6 +11,12 @@ import { SandboxProvider } from './runtime/sandbox-provider';
 import { MCPManager } from './runtime/mcp-manager';
 import { loadConfigForScript } from './runtime/config';
 import { valueToString, OrchidValue } from './runtime/values';
+import {
+  installServer,
+  installFromScript,
+  parseRequiredServers,
+} from './runtime/mcp-install';
+import { listRegistry, searchRegistry } from './runtime/mcp-registry';
 
 const USAGE = `
 orchid - The Orchid Language Runtime v0.1.0
@@ -19,6 +25,10 @@ Usage:
   orchid <file.orch>          Run an Orchid script
   orchid --parse <file.orch>  Parse and print AST
   orchid --lex <file.orch>    Tokenize and print tokens
+  orchid mcp install <name>   Install an MCP server into orchid.config.json
+  orchid mcp install <file>   Install all MCP servers required by a script
+  orchid mcp list             List available MCP servers
+  orchid mcp search <query>   Search the MCP server registry
   orchid --help               Show this help message
 
 Provider Options:
@@ -38,12 +48,19 @@ MCP Configuration:
   Create an orchid.config.json in your project directory to configure MCP servers.
   See orchid.config.example.json for the format.
 
+  Quick setup:
+    orchid mcp install filesystem    Install a known server
+    orchid mcp install script.orch   Install all servers a script needs
+    orchid mcp list                  See all available servers
+
 Examples:
   orchid examples/hello_world.orch
   orchid --provider claude examples/deep_research.orch
   orchid --provider claude --sandbox examples/hello_world.orch
   orchid --trace examples/financial_analysis.orch
   orchid --parse examples/deep_research.orch
+  orchid mcp install filesystem brave-search
+  orchid mcp install examples/financial_analysis.orch
 
 Environment Variables:
   ANTHROPIC_API_KEY    API key for Claude provider
@@ -99,12 +116,109 @@ function createProvider(args: string[]): OrchidProvider {
   return provider;
 }
 
+function handleMcpCommand(args: string[]): void {
+  const subcommand = args[0];
+
+  if (!subcommand || subcommand === 'help') {
+    console.log(`
+orchid mcp — Manage MCP servers
+
+Commands:
+  orchid mcp install <name...>   Install MCP servers by name
+  orchid mcp install <file.orch> Install all servers required by a script
+  orchid mcp list                List all available servers in the registry
+  orchid mcp search <query>      Search the registry
+
+Examples:
+  orchid mcp install filesystem
+  orchid mcp install filesystem brave-search memory
+  orchid mcp install examples/financial_analysis.orch
+  orchid mcp list
+  orchid mcp search database
+`);
+    return;
+  }
+
+  if (subcommand === 'list') {
+    const entries = listRegistry();
+    console.log(`\nAvailable MCP servers (${entries.length}):\n`);
+    const nameWidth = Math.max(...entries.map(e => e.name.length));
+    for (const { name, entry } of entries) {
+      console.log(`  ${name.padEnd(nameWidth + 2)} ${entry.description}`);
+    }
+    console.log(`\nInstall with: orchid mcp install <name>`);
+    return;
+  }
+
+  if (subcommand === 'search') {
+    const query = args.slice(1).join(' ');
+    if (!query) {
+      console.error('Usage: orchid mcp search <query>');
+      process.exit(1);
+    }
+    const results = searchRegistry(query);
+    if (results.length === 0) {
+      console.log(`No MCP servers found matching "${query}".`);
+      console.log(`Run "orchid mcp list" to see all available servers.`);
+      return;
+    }
+    console.log(`\nMCP servers matching "${query}":\n`);
+    const nameWidth = Math.max(...results.map(r => r.name.length));
+    for (const { name, entry } of results) {
+      console.log(`  ${name.padEnd(nameWidth + 2)} ${entry.description}`);
+    }
+    return;
+  }
+
+  if (subcommand === 'install') {
+    const targets = args.slice(1);
+    if (targets.length === 0) {
+      console.error('Usage: orchid mcp install <name...> or orchid mcp install <file.orch>');
+      process.exit(1);
+    }
+
+    // If the first target is a .orch file, install from script
+    if (targets.length === 1 && targets[0].endsWith('.orch')) {
+      const results = installFromScript(targets[0]);
+      for (const result of results) {
+        printInstallResult(result);
+      }
+      return;
+    }
+
+    // Otherwise install each named server
+    for (const name of targets) {
+      const result = installServer(name);
+      printInstallResult(result);
+    }
+    return;
+  }
+
+  console.error(`Unknown mcp command: "${subcommand}". Run "orchid mcp help" for usage.`);
+  process.exit(1);
+}
+
+function printInstallResult(result: { name: string; status: string; message: string }): void {
+  const icon =
+    result.status === 'installed' ? '+' :
+    result.status === 'already_configured' ? '=' :
+    result.status === 'not_found' ? '?' :
+    '!';
+  console.log(`  [${icon}] ${result.message}`);
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     console.log(USAGE);
     process.exit(0);
+  }
+
+  // ─── MCP Subcommands ──────────────────────────────────
+  if (args[0] === 'mcp') {
+    handleMcpCommand(args.slice(1));
+    return;
   }
 
   const flags = new Set(args.filter(a => a.startsWith('--')));

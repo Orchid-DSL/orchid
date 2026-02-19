@@ -28,6 +28,8 @@ export { SandboxProvider, SandboxLimits, SandboxUsage, SandboxError } from './ru
 export { MCPManager, MCPServerConfig, OrchidConfig, MCPToolInfo, MCPError } from './runtime/mcp-manager';
 export { loadConfig, loadConfigForScript } from './runtime/config';
 export { BUILTIN_MACROS, META_OPERATIONS, describeBuiltin } from './runtime/builtins';
+export { MCP_REGISTRY, lookupServer, searchRegistry, listRegistry, RegistryEntry } from './runtime/mcp-registry';
+export { installServer, installFromScript, parseRequiredServers, InstallResult } from './runtime/mcp-install';
 
 import { Lexer } from './lexer/lexer';
 import { Parser } from './parser/parser';
