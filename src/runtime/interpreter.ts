@@ -885,12 +885,20 @@ export class Interpreter {
           this.trace(`Connected MCP server "${node.name}" as "${alias}" (${tools.length} tools)`);
         }
       } catch (error) {
-        if (this.traceEnabled) {
-          this.trace(`MCP server "${node.name}" not configured — will use provider fallback`);
-        }
+        // Warn the user that this MCP server isn't configured
+        console.warn(
+          `[warn] MCP server "${node.name}" is not configured. Falling back to simulated calls.\n` +
+          `       To install it, run: orchid mcp install ${node.name}`,
+        );
         // Not a fatal error: the namespace is still registered so
         // provider.toolCall() will handle it as a simulated call
       }
+    } else if (node.kind === 'MCP' && !this.mcpManager) {
+      // No MCP manager at all — no orchid.config.json
+      console.warn(
+        `[warn] MCP server "${node.name}" is not configured (no orchid.config.json found).\n` +
+        `       To install it, run: orchid mcp install ${node.name}`,
+      );
     } else if (this.traceEnabled) {
       this.trace(`Loaded ${node.kind}: ${node.name} as ${alias}`);
     }

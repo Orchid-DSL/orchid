@@ -109,6 +109,18 @@ describe('E2E CLI', () => {
     });
   });
 
+  describe('MCP warnings', () => {
+    it('should warn when MCP server is not configured', async () => {
+      const { stdout, stderr, code } = await orchid([fixture('unconfigured_mcp.orch')]);
+      expect(code).toBe(0);
+      // The script still runs (fallback to provider), but warns on stderr
+      const output = stdout + stderr;
+      expect(output).toContain('not configured');
+      expect(output).toContain('orchid mcp install');
+      expect(output).toContain('some-unknown-server');
+    });
+  });
+
   describe('import system', () => {
     it('should import module with alias (import x as y)', async () => {
       const { stdout, code } = await orchid([fixture('import_test.orch')]);
