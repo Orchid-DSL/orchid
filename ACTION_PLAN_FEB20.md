@@ -6,11 +6,11 @@ Roadmap to get Orchid from "working reference implementation" to "tool researche
 
 ## Tier 1 — Unblock Adoption
 
-- [ ] **Publish to npm.** `npm publish` so `npx orchid-lang examples/hello_world.orch` works for anyone. Package.json is already configured (`orchid-lang`, `bin.orchid`, types). Need to verify name availability, add `files` field, test with `npm pack`.
+- [x] **Publish to npm.** `npm publish` so `npx orchid-lang examples/hello_world.orch` works for anyone. Package.json is already configured (`orchid-lang`, `bin.orchid`, types). Need to verify name availability, add `files` field, test with `npm pack`. *(Published orchid-lang@0.1.0 — Feb 20, 2026)*
 
-- [ ] **VS Code extension.** TextMate grammar derived from the EBNF for syntax highlighting, bracket matching, comment toggling. Publish to VS Code marketplace. Makes `.orch` files feel like a real language instead of plain text.
+- [x] **VS Code extension.** TextMate grammar derived from the EBNF for syntax highlighting, bracket matching, comment toggling. Publish to VS Code marketplace. Makes `.orch` files feel like a real language instead of plain text. *(Added in 6b446fd)*
 
-- [ ] **GitHub Actions CI.** Workflow running `npm test` + `npm run lint` on push/PR. Signals the project is serious and protects against regressions from contributors.
+- [x] **GitHub Actions CI.** Workflow running `npm test` + `npm run lint` on push/PR. Signals the project is serious and protects against regressions from contributors. *(Added in 6b446fd)*
 
 ## Tier 2 — Make Researchers Care
 
