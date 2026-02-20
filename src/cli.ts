@@ -26,6 +26,11 @@ import {
   deriveServerName,
   NpmPackageResult,
 } from './runtime/mcp-remote-registry';
+import {
+  TerminalStatusReporter,
+  SilentStatusReporter,
+  StatusReporter,
+} from './runtime/status';
 
 const USAGE = `
 orchid - The Orchid Language Runtime v0.1.0
@@ -50,6 +55,7 @@ Provider Options:
 
 Other Options:
   --trace    Enable execution tracing
+  --quiet    Suppress status spinner (for piping / CI)
   --parse    Parse only (print AST as JSON)
   --lex      Tokenize only (print token stream)
   --config <path>             Path to orchid.config.json (auto-detected by default)
@@ -361,6 +367,12 @@ async function main(): Promise<void> {
     const ast = parser.parse(tokens);
     const provider = createProvider(args);
     const traceEnabled = flags.has('--trace');
+    const quiet = flags.has('--quiet');
+
+    // Create status reporter for live terminal feedback
+    const status: StatusReporter = quiet
+      ? new SilentStatusReporter()
+      : new TerminalStatusReporter();
 
     // Load MCP configuration
     const config = loadConfigForScript(filePath);
@@ -377,6 +389,7 @@ async function main(): Promise<void> {
       trace: traceEnabled,
       mcpManager,
       scriptDir: path.dirname(filePath),
+      status,
     });
 
     const result = await interpreter.run(ast);

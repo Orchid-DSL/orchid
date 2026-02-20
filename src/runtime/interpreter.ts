@@ -20,6 +20,7 @@ import { OrchidProvider, TagInfo } from './provider';
 import { BUILTIN_MACROS, META_OPERATIONS } from './builtins';
 import { MCPManager } from './mcp-manager';
 import { OrchidPlugin, PluginContext } from './plugin';
+import { StatusReporter, SilentStatusReporter } from './status';
 
 /** Sentinel thrown to implement return statements. */
 class ReturnSignal {
@@ -48,6 +49,8 @@ export interface InterpreterOptions {
   mcpManager?: MCPManager;
   /** Directory for resolving relative import paths. Defaults to cwd. */
   scriptDir?: string;
+  /** Optional status reporter for live terminal feedback. */
+  status?: StatusReporter;
 }
 
 /**
@@ -78,6 +81,7 @@ export class Interpreter {
   private importCache: Map<string, Environment> = new Map();
   private importStack: Set<string> = new Set(); // tracks in-progress imports for cycle detection
   private plugins: Map<string, PluginModule> = new Map(); // alias -> loaded plugin
+  private status: StatusReporter;
 
   constructor(options: InterpreterOptions) {
     this.provider = options.provider;
@@ -85,6 +89,7 @@ export class Interpreter {
     this.globalEnv = new Environment();
     this.traceEnabled = options.trace ?? false;
     this.scriptDir = options.scriptDir ?? process.cwd();
+    this.status = options.status ?? new SilentStatusReporter();
   }
 
   async run(program: AST.Program): Promise<OrchidValue> {
@@ -374,18 +379,27 @@ export class Interpreter {
     if (name === 'Search') {
       const input = await this.resolveArgs(node.args, env);
       const query = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
-      const result = await this.withTimeout(
-        this.provider.search(query, tags),
-        tags, node.position,
-      );
-      this.implicitContext = result;
-      return result;
+      this.status.start(`Search("${query.length > 50 ? query.slice(0, 47) + '...' : query}")`);
+      try {
+        const result = await this.withTimeout(
+          this.provider.search(query, tags),
+          tags, node.position,
+        );
+        this.status.succeed('Search complete');
+        this.implicitContext = result;
+        return result;
+      } catch (e) {
+        this.status.fail('Search failed');
+        throw e;
+      }
     }
 
     if (name === 'Confidence') {
       const input = await this.resolveArgs(node.args, env);
       const scope = input.length > 0 ? valueToString(input[0]) : undefined;
+      this.status.start('Assessing confidence...');
       const conf = await this.provider.confidence(scope);
+      this.status.succeed(`Confidence: ${conf}`);
       return orchidNumber(conf);
     }
 
@@ -492,12 +506,19 @@ export class Interpreter {
         context['_count'] = valueToString(countVal);
       }
 
-      const result = await this.withTimeout(
-        this.provider.execute(name, inputStr, context, tags),
-        tags, node.position,
-      );
-      this.implicitContext = result;
-      return result;
+      this.status.start(`${name}(...)`);
+      try {
+        const result = await this.withTimeout(
+          this.provider.execute(name, inputStr, context, tags),
+          tags, node.position,
+        );
+        this.status.succeed(`${name} done`);
+        this.implicitContext = result;
+        return result;
+      } catch (e) {
+        this.status.fail(`${name} failed`);
+        throw e;
+      }
     }
 
     // Unknown operation — try calling as a generic operation
@@ -505,12 +526,19 @@ export class Interpreter {
     const inputStr = input.length > 0
       ? valueToString(input[0])
       : valueToString(this.implicitContext);
-    const result = await this.withTimeout(
-      this.provider.execute(name, inputStr, {}, tags),
-      tags, node.position,
-    );
-    this.implicitContext = result;
-    return result;
+    this.status.start(`${name}(...)`);
+    try {
+      const result = await this.withTimeout(
+        this.provider.execute(name, inputStr, {}, tags),
+        tags, node.position,
+      );
+      this.status.succeed(`${name} done`);
+      this.implicitContext = result;
+      return result;
+    } catch (e) {
+      this.status.fail(`${name} failed`);
+      throw e;
+    }
   }
 
   private async executeNamespacedOperation(node: AST.NamespacedOperation, env: Environment): Promise<OrchidValue> {
@@ -530,24 +558,46 @@ export class Interpreter {
 
     // Route to MCPManager if the namespace is a connected MCP server
     if (this.mcpManager?.hasServer(node.namespace)) {
-      const result = await this.mcpManager.callTool(node.namespace, node.name, args);
-      this.implicitContext = result;
-      return result;
+      this.status.start(`${node.namespace}:${node.name}(...)`);
+      try {
+        const result = await this.mcpManager.callTool(node.namespace, node.name, args);
+        this.status.succeed(`${node.namespace}:${node.name} done`);
+        this.implicitContext = result;
+        return result;
+      } catch (e) {
+        this.status.fail(`${node.namespace}:${node.name} failed`);
+        throw e;
+      }
     }
 
     // Auto-connect to configured MCP server on first use
     if (this.mcpManager?.isConfigured(node.namespace)) {
       if (this.traceEnabled) this.trace(`Auto-connecting MCP server: ${node.namespace}`);
+      this.status.start(`Connecting to ${node.namespace}...`);
       await this.mcpManager.connect(node.namespace);
-      const result = await this.mcpManager.callTool(node.namespace, node.name, args);
-      this.implicitContext = result;
-      return result;
+      this.status.update(`${node.namespace}:${node.name}(...)`);
+      try {
+        const result = await this.mcpManager.callTool(node.namespace, node.name, args);
+        this.status.succeed(`${node.namespace}:${node.name} done`);
+        this.implicitContext = result;
+        return result;
+      } catch (e) {
+        this.status.fail(`${node.namespace}:${node.name} failed`);
+        throw e;
+      }
     }
 
     // Fallback to provider for non-MCP namespaces
-    const result = await this.provider.toolCall(node.namespace, node.name, args, tags);
-    this.implicitContext = result;
-    return result;
+    this.status.start(`${node.namespace}:${node.name}(...)`);
+    try {
+      const result = await this.provider.toolCall(node.namespace, node.name, args, tags);
+      this.status.succeed(`${node.namespace}:${node.name} done`);
+      this.implicitContext = result;
+      return result;
+    } catch (e) {
+      this.status.fail(`${node.namespace}:${node.name} failed`);
+      throw e;
+    }
   }
 
   /**
@@ -891,6 +941,7 @@ export class Interpreter {
       if (iterable.kind !== 'list') {
         throw new OrchidError('TypeError', 'Cannot iterate over non-list in fork', node.position);
       }
+      this.status.start(`fork: ${iterable.elements.length} iterations in parallel`);
       const results = await Promise.all(
         iterable.elements.map(async (element) => {
           const forkEnv = env.child();
@@ -898,6 +949,7 @@ export class Interpreter {
           return this.executeForkBranch(node.forLoop!.body, forkEnv, parentContext);
         })
       );
+      this.status.succeed(`fork: ${iterable.elements.length} iterations complete`);
       const result = orchidList(results);
       this.implicitContext = result;
       return result;
@@ -905,6 +957,11 @@ export class Interpreter {
 
     // Named or unnamed branches
     const isNamed = node.branches.some(b => b.name);
+    const branchCount = node.branches.length;
+    const branchLabel = isNamed
+      ? node.branches.map(b => b.name).join(', ')
+      : `${branchCount} branches`;
+    this.status.start(`fork: ${branchLabel} in parallel`);
 
     if (isNamed) {
       // Named fork → returns dict
@@ -919,6 +976,7 @@ export class Interpreter {
       for (const r of results) {
         entries.set(r.name, r.value);
       }
+      this.status.succeed(`fork: ${branchLabel} complete`);
       const result = orchidDict(entries);
       this.implicitContext = result;
       return result;
@@ -931,6 +989,7 @@ export class Interpreter {
         return this.executeForkBranch(branch.body, forkEnv, parentContext);
       })
     );
+    this.status.succeed(`fork: ${branchCount} branches complete`);
     const result = orchidList(results);
     this.implicitContext = result;
     return result;
