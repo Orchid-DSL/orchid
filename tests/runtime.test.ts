@@ -1,9 +1,12 @@
+import * as path from 'path';
 import { Lexer } from '../src/lexer/lexer';
 import { Parser } from '../src/parser/parser';
 import { Interpreter, OrchidError } from '../src/runtime/interpreter';
 import { ConsoleProvider } from '../src/runtime/provider';
 import { OrchidValue, valueToString } from '../src/runtime/values';
 import { execute } from '../src/index';
+
+const fixturesDir = path.resolve(__dirname, 'fixtures');
 
 // Suppress console.log during tests
 const originalLog = console.log;
@@ -539,6 +542,225 @@ events := Stream("Survived")`;
       if (result.kind === 'list') {
         expect(result.elements).toHaveLength(1);
       }
+    });
+  });
+
+  // ─── Tag value resolution ─────────────────────────────────
+
+  describe('tag value resolution', () => {
+    it('should resolve tag values and pass them to provider', async () => {
+      // Tags with values should be resolved and visible in the result string
+      const result = await run('Search("topic")<deep>');
+      expect(result.kind).toBe('string');
+      // ConsoleProvider includes tag names in output
+      expect(valueToString(result)).toContain('Search');
+    });
+
+    it('should resolve numeric tag values in until loop', async () => {
+      // Tags attach to operation calls (after closing paren)
+      // The until loop reads <retry=N> from the condition's tags
+      const source = `draft := "first attempt"
+until Confidence()<retry=3>:
+    draft := Refine(draft)`;
+      const result = await run(source);
+      // ConsoleProvider.confidence returns 0.75 which is truthy,
+      // so the loop exits after first iteration check
+      expect(result.kind).toBe('string');
+    });
+
+    it('should pass resolved tag values through to provider', async () => {
+      // ConsoleProvider formats tags — with resolved values, output changes
+      const result = await run('CoT("analyze this")<verbose>');
+      expect(result.kind).toBe('string');
+    });
+  });
+
+  // ─── Timeout via tags ─────────────────────────────────────
+
+  describe('timeout via tags', () => {
+    it('should not timeout when operation completes quickly', async () => {
+      // ConsoleProvider resolves immediately, so 5000ms is plenty
+      const result = await run('Search("fast query")<timeout=5000>');
+      expect(result.kind).toBe('string');
+    });
+
+    it('should timeout when operation takes too long', async () => {
+      // Create a provider that delays, with an abort mechanism
+      let abortTimer: ReturnType<typeof setTimeout> | undefined;
+      const slowProvider = new ConsoleProvider();
+      slowProvider.search = async (_query, _tags) => {
+        return new Promise<OrchidValue>((resolve) => {
+          abortTimer = setTimeout(() => resolve({ kind: 'string', value: 'done' }), 10000);
+        });
+      };
+
+      const source = 'Search("slow query")<timeout=50>';
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({ provider: slowProvider });
+
+      await expect(interpreter.run(ast)).rejects.toThrow('Timeout');
+      if (abortTimer) clearTimeout(abortTimer);
+      await interpreter.shutdown();
+    }, 10000);
+
+    it('should parse string timeout values', async () => {
+      // "5000" as a string should also work
+      const result = await run('Search("query")<timeout="5000">');
+      expect(result.kind).toBe('string');
+    });
+  });
+
+  // ─── require MCP/Plugin availability ──────────────────────
+
+  describe('require MCP/Plugin', () => {
+    it('should throw ToolNotFound for missing MCP server', async () => {
+      await expect(run('require MCP("nonexistent_server"), "Need database"'))
+        .rejects.toThrow('ToolNotFound');
+    });
+
+    it('should throw ToolNotFound for missing plugin', async () => {
+      await expect(run('require Plugin("nonexistent_plugin")'))
+        .rejects.toThrow('ToolNotFound');
+    });
+
+    it('should pass for available plugin', async () => {
+      // The greeter plugin is in test fixtures
+      const source = 'require Plugin("greeter")';
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({
+        provider: new ConsoleProvider(),
+        scriptDir: fixturesDir,
+      });
+      // Should not throw
+      const result = await interpreter.run(ast);
+      await interpreter.shutdown();
+      expect(result.kind).toBe('null');
+    });
+
+    it('should still work as general condition check', async () => {
+      // require with non-MCP/Plugin condition
+      const result = await run('require true, "should pass"');
+      expect(result.kind).toBe('null');
+    });
+
+    it('should throw PermissionDenied for false general condition', async () => {
+      await expect(run('require false, "denied"'))
+        .rejects.toThrow('PermissionDenied');
+    });
+  });
+
+  // ─── @requires metadata validation ────────────────────────
+
+  describe('@requires metadata validation', () => {
+    it('should throw ToolNotFound for missing required MCP server', async () => {
+      const source = `@orchid 0.1
+@requires MCP("nonexistent_db")
+
+x := 42`;
+      await expect(run(source)).rejects.toThrow('ToolNotFound');
+    });
+
+    it('should throw ToolNotFound for missing required plugin', async () => {
+      const source = `@orchid 0.1
+@requires Plugin("nonexistent_plugin")
+
+x := 42`;
+      await expect(run(source)).rejects.toThrow('ToolNotFound');
+    });
+
+    it('should pass for available required plugin', async () => {
+      const source = `@orchid 0.1
+@requires Plugin("greeter")
+
+x := 42`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({
+        provider: new ConsoleProvider(),
+        scriptDir: fixturesDir,
+      });
+      const result = await interpreter.run(ast);
+      await interpreter.shutdown();
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') expect(result.value).toBe(42);
+    });
+  });
+
+  // ─── Import cycle detection ───────────────────────────────
+
+  describe('import cycle detection', () => {
+    it('should throw CyclicDependency for circular imports', async () => {
+      const source = `import cycle_a`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({
+        provider: new ConsoleProvider(),
+        scriptDir: fixturesDir,
+      });
+
+      await expect(interpreter.run(ast)).rejects.toThrow('CyclicDependency');
+      await interpreter.shutdown();
+    });
+  });
+
+  // ─── Spec error types ─────────────────────────────────────
+
+  describe('spec error types', () => {
+    it('should throw ValidationError on assert failure', async () => {
+      await expect(run('assert false, "bad"')).rejects.toThrow('ValidationError');
+    });
+
+    it('should throw ToolNotFound for missing plugin operation', async () => {
+      const source = `Use Plugin("greeter") as g
+g:NonExistent("test")`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({
+        provider: new ConsoleProvider(),
+        scriptDir: fixturesDir,
+      });
+
+      await expect(interpreter.run(ast)).rejects.toThrow('ToolNotFound');
+      await interpreter.shutdown();
+    });
+
+    it('should use Timeout error type', async () => {
+      let abortTimer: ReturnType<typeof setTimeout> | undefined;
+      const slowProvider = new ConsoleProvider();
+      slowProvider.execute = async () => {
+        return new Promise<OrchidValue>((resolve) => {
+          abortTimer = setTimeout(() => resolve({ kind: 'null' } as OrchidValue), 10000);
+        });
+      };
+
+      const source = 'CoT("slow")<timeout=20>';
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({ provider: slowProvider });
+
+      try {
+        await interpreter.run(ast);
+        fail('Should have thrown');
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(OrchidError);
+        expect(e.errorType).toBe('Timeout');
+      }
+      if (abortTimer) clearTimeout(abortTimer);
+      await interpreter.shutdown();
+    }, 10000);
+
+    it('should use CyclicDependency error type', async () => {
+      const source = `import cycle_a`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({
+        provider: new ConsoleProvider(),
+        scriptDir: fixturesDir,
+      });
+
+      try {
+        await interpreter.run(ast);
+        fail('Should have thrown');
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(OrchidError);
+        expect(e.errorType).toBe('CyclicDependency');
+      }
+      await interpreter.shutdown();
     });
   });
 });

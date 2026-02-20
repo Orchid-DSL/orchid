@@ -76,6 +76,7 @@ export class Interpreter {
   private agents: Map<string, AST.AgentDef> = new Map();
   private scriptDir: string;
   private importCache: Map<string, Environment> = new Map();
+  private importStack: Set<string> = new Set(); // tracks in-progress imports for cycle detection
   private plugins: Map<string, PluginModule> = new Map(); // alias -> loaded plugin
 
   constructor(options: InterpreterOptions) {
@@ -153,11 +154,60 @@ export class Interpreter {
         }
         break;
       case 'requires':
-        // Validate requirements would check provider capabilities
+        await this.validateRequires(meta);
         break;
       default:
         // Store as metadata
         break;
+    }
+  }
+
+  /**
+   * Validate @requires metadata directives.
+   *
+   * @requires MCP("filesystem") checks that the MCP server is configured.
+   * @requires Plugin("sentiment") checks that the plugin file is available.
+   * @requires MCP("a"), Plugin("b") validates a list of requirements.
+   */
+  private async validateRequires(meta: AST.Metadata): Promise<void> {
+    const nodes = meta.value.type === 'ListLiteral' ? meta.value.elements : [meta.value];
+
+    for (const node of nodes) {
+      if (node.type !== 'Operation') continue;
+
+      if (node.name === 'MCP') {
+        const serverName = node.args.length > 0 ? this.nodeToInputString(node.args[0].value) : '';
+        const available = this.mcpManager
+          ? (this.mcpManager.isConfigured(serverName) || this.mcpManager.hasServer(serverName))
+          : false;
+        if (!available) {
+          throw new OrchidError(
+            'ToolNotFound',
+            `Script requires MCP server "${serverName}" but it is not configured. ` +
+            `Run: orchid mcp install ${serverName}`,
+            meta.position,
+          );
+        }
+        if (this.traceEnabled) {
+          this.trace(`@requires MCP("${serverName}") — OK (configured)`);
+        }
+      }
+
+      if (node.name === 'Plugin') {
+        const pluginName = node.args.length > 0 ? this.nodeToInputString(node.args[0].value) : '';
+        const rawName = pluginName.replace(/@[^@]+$/, '');
+        const available = this.plugins.has(rawName) || this.resolvePluginPath(rawName) !== null;
+        if (!available) {
+          throw new OrchidError(
+            'ToolNotFound',
+            `Script requires plugin "${pluginName}" but it is not available.`,
+            meta.position,
+          );
+        }
+        if (this.traceEnabled) {
+          this.trace(`@requires Plugin("${pluginName}") — OK (available)`);
+        }
+      }
     }
   }
 
@@ -304,7 +354,7 @@ export class Interpreter {
 
   private async executeOperation(node: AST.Operation, env: Environment): Promise<OrchidValue> {
     const name = node.name;
-    const tags = this.resolveTags(node.tags, env);
+    const tags = await this.resolveTags(node.tags, env);
 
     // Check for user-defined macros/agents first
     if (this.macros.has(name)) {
@@ -324,7 +374,10 @@ export class Interpreter {
     if (name === 'Search') {
       const input = await this.resolveArgs(node.args, env);
       const query = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
-      const result = await this.provider.search(query, tags);
+      const result = await this.withTimeout(
+        this.provider.search(query, tags),
+        tags, node.position,
+      );
       this.implicitContext = result;
       return result;
     }
@@ -439,7 +492,10 @@ export class Interpreter {
         context['_count'] = valueToString(countVal);
       }
 
-      const result = await this.provider.execute(name, inputStr, context, tags);
+      const result = await this.withTimeout(
+        this.provider.execute(name, inputStr, context, tags),
+        tags, node.position,
+      );
       this.implicitContext = result;
       return result;
     }
@@ -449,13 +505,16 @@ export class Interpreter {
     const inputStr = input.length > 0
       ? valueToString(input[0])
       : valueToString(this.implicitContext);
-    const result = await this.provider.execute(name, inputStr, {}, tags);
+    const result = await this.withTimeout(
+      this.provider.execute(name, inputStr, {}, tags),
+      tags, node.position,
+    );
     this.implicitContext = result;
     return result;
   }
 
   private async executeNamespacedOperation(node: AST.NamespacedOperation, env: Environment): Promise<OrchidValue> {
-    const tags = this.resolveTags(node.tags, env);
+    const tags = await this.resolveTags(node.tags, env);
 
     // Route to loaded Plugin if the namespace matches
     const plugin = this.plugins.get(node.namespace);
@@ -511,7 +570,7 @@ export class Interpreter {
         args[arg.name || `arg${Object.keys(args).length}`] = val;
       }
 
-      const tags = this.resolveTags(node.tags, callerEnv);
+      const tags = await this.resolveTags(node.tags, callerEnv);
       const ctx = this.makePluginContext(tags);
       const result = await operation(args, ctx);
       this.implicitContext = result;
@@ -519,11 +578,13 @@ export class Interpreter {
     }
 
     // ── .orch plugin: dispatch to agent, macro, or callable ──
+    const resolvedTags = await this.resolveTags(node.tags, callerEnv);
+
     if (plugin.agents.has(opName)) {
       const result = await plugin.interpreter.callAgent(
         plugin.agents.get(opName)!,
         node.args,
-        this.resolveTags(node.tags, callerEnv),
+        resolvedTags,
         callerEnv,
       );
       this.implicitContext = result;
@@ -534,7 +595,7 @@ export class Interpreter {
       const result = await plugin.interpreter.callMacro(
         plugin.macros.get(opName)!,
         node.args,
-        this.resolveTags(node.tags, callerEnv),
+        resolvedTags,
         callerEnv,
       );
       this.implicitContext = result;
@@ -546,7 +607,7 @@ export class Interpreter {
       const result = await plugin.interpreter.callCallable(
         binding,
         node.args,
-        this.resolveTags(node.tags, callerEnv),
+        resolvedTags,
         callerEnv,
       );
       this.implicitContext = result;
@@ -701,6 +762,43 @@ export class Interpreter {
   }
 
   private async executeRequire(node: AST.RequireStatement, env: Environment): Promise<OrchidValue> {
+    // Special handling for require MCP("name") and require Plugin("name")
+    if (node.condition.type === 'Operation') {
+      const opName = node.condition.name;
+
+      if (opName === 'MCP') {
+        const args = await this.resolveArgs(node.condition.args, env);
+        const serverName = args.length > 0 ? valueToString(args[0]) : '';
+        const available = this.mcpManager
+          ? (this.mcpManager.isConfigured(serverName) || this.mcpManager.hasServer(serverName))
+          : false;
+        if (!available) {
+          throw new OrchidError(
+            'ToolNotFound',
+            node.message || `Required MCP server "${serverName}" is not configured`,
+            node.position,
+          );
+        }
+        return orchidNull();
+      }
+
+      if (opName === 'Plugin') {
+        const args = await this.resolveArgs(node.condition.args, env);
+        const pluginName = args.length > 0 ? valueToString(args[0]) : '';
+        const loaded = this.plugins.has(pluginName);
+        const available = loaded || this.resolvePluginPath(pluginName.replace(/@[^@]+$/, '')) !== null;
+        if (!available) {
+          throw new OrchidError(
+            'ToolNotFound',
+            node.message || `Required plugin "${pluginName}" is not available`,
+            node.position,
+          );
+        }
+        return orchidNull();
+      }
+    }
+
+    // General require: evaluate condition as boolean
     const condition = await this.evaluate(node.condition, env);
     if (!isTruthy(condition)) {
       throw new OrchidError(
@@ -1374,8 +1472,20 @@ export class Interpreter {
       return orchidNull();
     }
 
+    // Detect circular imports
+    if (this.importStack.has(resolved)) {
+      const cycle = [...this.importStack, resolved].join(' → ');
+      throw new OrchidError(
+        'CyclicDependency',
+        `Circular import detected: ${cycle}`,
+        node.position,
+      );
+    }
+    this.importStack.add(resolved);
+
     // Read and parse the source
     if (!fs.existsSync(resolved)) {
+      this.importStack.delete(resolved);
       throw new OrchidError(
         'ImportError',
         `Module not found: ${resolved} (from import "${node.path}")`,
@@ -1392,6 +1502,7 @@ export class Interpreter {
       const parser = new Parser();
       ast = parser.parse(tokens);
     } catch (e: any) {
+      this.importStack.delete(resolved);
       throw new OrchidError(
         'ImportError',
         `Failed to parse "${node.path}": ${e.message}`,
@@ -1406,16 +1517,26 @@ export class Interpreter {
       mcpManager: this.mcpManager,
       scriptDir: path.dirname(resolved),
     });
+    // Share the import stack so nested imports can also detect cycles
+    moduleInterpreter.importStack = this.importStack;
 
     try {
       await moduleInterpreter.run(ast);
     } catch (e: any) {
+      this.importStack.delete(resolved);
+      // Preserve CyclicDependency errors rather than wrapping them
+      if (e instanceof OrchidError && e.errorType === 'CyclicDependency') {
+        throw e;
+      }
       throw new OrchidError(
         'ImportError',
         `Error executing "${node.path}": ${e.message}`,
         node.position,
       );
     }
+
+    // Import succeeded — remove from in-progress stack
+    this.importStack.delete(resolved);
 
     // Cache and merge the module's exported bindings
     const moduleEnv = moduleInterpreter.globalEnv;
@@ -1676,11 +1797,16 @@ export class Interpreter {
     return named;
   }
 
-  private resolveTags(tags: AST.Tag[], env: Environment): TagInfo[] {
-    return tags.map(t => ({
-      name: t.name,
-      value: undefined, // Tag values resolved lazily if needed
-    }));
+  private async resolveTags(tags: AST.Tag[], env: Environment): Promise<TagInfo[]> {
+    const resolved: TagInfo[] = [];
+    for (const t of tags) {
+      const info: TagInfo = { name: t.name };
+      if (t.value) {
+        info.value = await this.evaluate(t.value, env);
+      }
+      resolved.push(info);
+    }
+    return resolved;
   }
 
   private nodeToInputString(node: AST.Node): string {
@@ -1695,6 +1821,64 @@ export class Interpreter {
     if (this.traceEnabled) {
       console.log(`  [trace] ${message}`);
     }
+  }
+
+  // ─── Timeout ────────────────────────────────────────────
+
+  /**
+   * Wrap a promise with an optional timeout from resolved tags.
+   *
+   * If a <timeout=N> or <timeout=Ns> tag is present, the operation is
+   * raced against a timer. If the timer wins, a Timeout error is thrown.
+   * Without the tag, the promise passes through unchanged.
+   */
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    tags: TagInfo[],
+    position?: AST.Position,
+  ): Promise<T> {
+    const timeoutTag = tags.find(t => t.name === 'timeout');
+    if (!timeoutTag?.value) return promise;
+
+    let ms: number;
+    if (timeoutTag.value.kind === 'number') {
+      // If the number has a suffix like 's', the raw value is in that unit
+      ms = timeoutTag.value.value;
+      if (timeoutTag.value.suffix === 's') {
+        ms = timeoutTag.value.value * 1000;
+      } else if (timeoutTag.value.suffix === 'm') {
+        ms = timeoutTag.value.value * 60000;
+      } else if (!timeoutTag.value.suffix) {
+        // Bare number — treat as milliseconds
+        ms = timeoutTag.value.value;
+      }
+    } else if (timeoutTag.value.kind === 'string') {
+      // Parse "10s", "5000", "2m"
+      const str = timeoutTag.value.value;
+      const match = str.match(/^(\d+(?:\.\d+)?)(s|ms|m)?$/);
+      if (match) {
+        const n = parseFloat(match[1]);
+        const unit = match[2] || 'ms';
+        if (unit === 's') ms = n * 1000;
+        else if (unit === 'm') ms = n * 60000;
+        else ms = n;
+      } else {
+        return promise; // Unparseable timeout value, skip
+      }
+    } else {
+      return promise; // Non-numeric/string timeout value, skip
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new OrchidError('Timeout', `Operation timed out after ${ms}ms`, position));
+      }, ms);
+
+      promise.then(
+        (result) => { clearTimeout(timer); resolve(result); },
+        (error) => { clearTimeout(timer); reject(error); },
+      );
+    });
   }
 
   // ─── Discover ───────────────────────────────────────────
