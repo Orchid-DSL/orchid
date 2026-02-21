@@ -105,7 +105,7 @@ ELI5                                      # implicit: operates on _
 
 ### 2.1 The Walrus Operator
 
-Orchid uses `:=` for assignment, borrowed from Python's walrus operator. This signals that assignment is a *binding* of a name to an agent output, not a traditional variable store.
+Orchid uses `:=` for assignment, borrowed from Python's walrus operator. This signals that assignment is a naming of an agent output, not a traditional variable store.
 
 ```orchid
 results := Search("climate policy 2024")
@@ -139,7 +139,7 @@ weights := {relevance: 0.7, recency: 0.3}
 
 Triple hash marks (`###`) define atomic execution blocks. Everything inside executes as a single, uninterruptible train of thought with full context maintained. If any unhandled error occurs inside, the entire block rolls back.
 
-Variables assigned inside an atomic block **are visible after the block closes**. The block controls execution atomicity, not variable scope. Think of it as a transaction: either all bindings commit or none do.
+Variables assigned inside an atomic block **are visible after the block closes**. The block controls execution atomicity, not variable scope. Think of it as a transaction: either all assignments commit or none do.
 
 ```orchid
 ###
@@ -246,9 +246,9 @@ else:
 
 | Operator | Name        | Description                                          | Example                             |
 |----------|-------------|------------------------------------------------------|-------------------------------------|
-| `:=`     | Bind        | Assign operation output to a name                    | `x := Search("topic")`             |
-| `+=`     | Append      | Merge a value into an existing binding               | `report += Creative("new angle")`   |
-| `+`      | Merge       | Combine two contexts/outputs into one                | `full := research + analysis`       |
+| `:=`     | Assign      | Assign operation output to a name                    | `x := Search("topic")`             |
+| `+=`     | Append      | Merge a value into an existing variable              | `report += Creative("new angle")`   |
+| `+`      | Add / Merge | Numeric addition; context-aware merge for strings, lists, dicts | `full := research + analysis` |
 | `\|`     | Alternative | Try left; on failure or low confidence, try right    | `result := Search(a) \| Search(b)` |
 | `>>`     | Pipe        | Pass left output as right input                      | `Search("topic") >> CoT >> ELI5`   |
 
@@ -285,14 +285,22 @@ else:
 |----------|-------|------------------------------------------------|--------------------------------------|
 | `in`     | In    | Test membership in list, string, or dict       | `if "postgres" in available:`        |
 
-### 4.1 Merge Semantics
+### 4.1 Add / Merge Semantics
 
-The `+` operator performs context-aware merging. The agent synthesizes rather than concatenates. Exact merge behavior is implementation-defined; runtimes should document their strategy.
+The `+` operator has dual behavior depending on operand types. For numbers, it performs standard arithmetic addition. For all other types, it performs context-aware merging:
+
+- **Numbers:** arithmetic addition (`3 + 4` → `7`)
+- **Strings:** merge with paragraph separator (`a + b` → `"a\n\nb"`)
+- **Lists:** concatenation (`[1,2] + [3,4]` → `[1,2,3,4]`)
+- **Dicts:** merge (right overwrites duplicate keys)
+
+Exact merge behavior for strings is implementation-defined; runtimes should document their strategy.
 
 ```orchid
 market := CoT("market analysis")
 technical := CoT("technical analysis")
 report := market + technical   # Agent synthesizes both perspectives
+total := subtotal + tax         # Arithmetic addition
 ```
 
 ### 4.2 Alternative Semantics
@@ -648,7 +656,7 @@ Orchid uses a hybrid confidence model. The agent proposes a confidence score bas
 - Data freshness (cached results degrade confidence over time)
 - Error history (retries and fallbacks in the current scope lower confidence)
 
-The final `Confidence()` value is a weighted blend. Runtimes must document their weighting strategy. When called with a scope argument, e.g. `Confidence(analysis)`, only signals relevant to that specific binding are considered.
+The final `Confidence()` value is a weighted blend. Runtimes must document their weighting strategy. When called with a scope argument, e.g. `Confidence(analysis)`, only signals relevant to that specific variable are considered.
 
 ```orchid
 # Confidence is useful but imprecise. Treat it as a heuristic, not a guarantee.
@@ -675,7 +683,7 @@ The key differences between the three extension mechanisms:
 
 | Mechanism | What it is | Syntax | Scope |
 |-----------|-----------|--------|-------|
-| `import`  | Orchid code reuse | `import path as name` | Merges bindings into current scope |
+| `import`  | Orchid code reuse | `import path as name` | Merges definitions into current scope |
 | `Use MCP` | External tool server | `Use MCP("name")` | Namespaced, runs out-of-process |
 | `Use Plugin` | Runtime capability | `Use Plugin("name")` | Namespaced, runs in-process with provider access |
 

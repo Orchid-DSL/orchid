@@ -23,7 +23,7 @@ orchid/
 │   │   └── ast.ts                      # AST node type definitions
 │   └── runtime/
 │       ├── interpreter.ts              # Main execution engine (AST → results)
-│       ├── environment.ts              # Scoped variable bindings
+│       ├── environment.ts              # Scoped variable storage
 │       ├── values.ts                   # Orchid value types (string, number, list, dict, etc.)
 │       ├── builtins.ts                 # Built-in macro names and descriptions
 │       ├── provider.ts                 # OrchidProvider interface + ConsoleProvider
@@ -152,8 +152,8 @@ node dist/cli.js --parse examples/deep_research.orch
 
 ### Operators
 
-**Composition:** `:=` (bind), `+=` (append), `+` (merge), `|` (alternative), `>>` (pipe)
-**Arithmetic:** `*` (multiply / string concat), `/` (divide / literal string removal), `-` (subtract / semantic string subtraction via LLM)
+**Composition:** `:=` (assign), `+=` (append), `|` (alternative), `>>` (pipe)
+**Arithmetic:** `+` (add / merge), `*` (multiply / string concat), `/` (divide / literal string removal), `-` (subtract / semantic string subtraction via LLM)
 **Comparison:** `==`, `!=`, `>`, `<`, `>=`, `<=`
 **Logical:** `and`, `or`, `not`
 **Containment:** `in`
