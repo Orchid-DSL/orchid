@@ -203,6 +203,8 @@ Some macros accept a count parameter: `Debate[3]("topic")`, `Brainstorm[10]("ide
 ```orchid
 CoT("analysis")<deep>                 # thoroughness
 Search("topic")<retry=3, timeout=30s>  # resilience
+mode := "deep"
+CoT("analysis")<$mode>                # dynamic tag resolution from variable
 ```
 
 ## Conventions
@@ -213,6 +215,11 @@ Search("topic")<retry=3, timeout=30s>  # resilience
 - No external runtime dependencies beyond Anthropic SDK, MCP SDK, and Zod
 - Status/progress output goes to stderr; script results go to stdout
 - Dict keys in Orchid are unquoted identifiers: `{name: "value"}` not `{"name": "value"}`
+- `ORCHID_PATH` env var is searched for shared import libraries (colon-separated directories)
+- Agent `permissions:` blocks are enforced at runtime (namespace and action-level)
+- `Save(content, path="file.txt")` writes to disk; `Save(content)` writes to stdout
+- `Cost()` returns actual token count from the provider (0 for ConsoleProvider)
+- `DataUnavailable`, `LowConfidence`, `ContextOverflow` errors are thrown at runtime
 
 ## Common Tasks
 

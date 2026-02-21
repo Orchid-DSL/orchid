@@ -84,6 +84,11 @@ export class Interpreter {
   private status: StatusReporter;
   private operationCache: Map<string, OrchidValue> = new Map();
   private frozenVars: Set<string> = new Set();
+  /** Stack of active agent permission scopes. The top entry restricts tool access. */
+  private permissionsStack: AST.PermissionsBlock[] = [];
+  /** Accumulated context size (character count) for ContextOverflow detection. */
+  private contextSize = 0;
+  private readonly maxContextSize = 1_000_000; // 1M chars ≈ ~250K tokens
 
   constructor(options: InterpreterOptions) {
     this.provider = options.provider;
@@ -395,10 +400,15 @@ export class Interpreter {
       const input = await this.resolveArgs(node.args, env);
       const query = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
       return this.withTagBehaviors('Search', query, tags, async () => {
-        return this.withTimeout(
+        const result = await this.withTimeout(
           this.provider.search(query, tags),
           tags, node.position,
         );
+        // Throw DataUnavailable if the search returned nothing meaningful
+        if (result.kind === 'null' || (result.kind === 'string' && result.value.trim() === '')) {
+          throw new OrchidError('DataUnavailable', `Search returned no results for: "${query}"`, node.position);
+        }
+        return result;
       }, node.position);
     }
 
@@ -449,7 +459,8 @@ export class Interpreter {
     }
 
     if (name === 'Cost') {
-      return orchidString(`[Cost: estimated tokens used in session]`);
+      const tokens = this.provider.getTokensUsed?.() ?? 0;
+      return orchidNumber(tokens);
     }
 
     if (name === 'Elapsed') {
@@ -471,9 +482,23 @@ export class Interpreter {
     }
 
     if (name === 'Save') {
-      const input = await this.resolveArgs(node.args, env);
-      const content = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
-      console.log(`[Save]: ${content.slice(0, 100)}...`);
+      const namedArgs = await this.resolveNamedArgs(node.args, env);
+      // Only use positional (unnamed) args for content
+      const positionalArgs: OrchidValue[] = [];
+      for (const arg of node.args) {
+        if (!arg.name) positionalArgs.push(await this.evaluate(arg.value, env));
+      }
+      const content = positionalArgs.length > 0 ? valueToString(positionalArgs[0]) : valueToString(this.implicitContext);
+      const pathArg = namedArgs.get('path');
+      if (pathArg && pathArg.kind === 'string') {
+        const savePath = path.resolve(this.scriptDir, pathArg.value);
+        fs.mkdirSync(path.dirname(savePath), { recursive: true });
+        fs.writeFileSync(savePath, content, 'utf-8');
+        if (this.traceEnabled) this.trace(`Saved to: ${savePath}`);
+      } else {
+        // No path given — write to stdout
+        process.stdout.write(content + '\n');
+      }
       return orchidNull();
     }
 
@@ -541,6 +566,18 @@ export class Interpreter {
 
   private async executeNamespacedOperation(node: AST.NamespacedOperation, env: Environment): Promise<OrchidValue> {
     const tags = await this.resolveTags(node.tags, env);
+
+    // Enforce agent permission constraints
+    this.checkPermission(node.namespace, node.name, node.position);
+
+    // Check for imported macros/agents stored with colon key (namespace:name)
+    const colonKey = `${node.namespace}:${node.name}`;
+    if (this.macros.has(colonKey)) {
+      return this.callMacro(this.macros.get(colonKey)!, node.args, tags, env);
+    }
+    if (this.agents.has(colonKey)) {
+      return this.callAgent(this.agents.get(colonKey)!, node.args, tags, env);
+    }
 
     // Route to loaded Plugin if the namespace matches
     const plugin = this.plugins.get(node.namespace);
@@ -775,7 +812,10 @@ export class Interpreter {
       if (bestEffort) {
         return result;
       }
-      throw new OrchidError('ValidationError', `Until loop exhausted after ${maxRetries} iterations`, node.position);
+      // If the condition involves Confidence, throw LowConfidence
+      const isConfidenceCondition = this.nodeReferencesConfidence(node.condition);
+      const errorType = isConfidenceCondition ? 'LowConfidence' : 'ValidationError';
+      throw new OrchidError(errorType, `Until loop exhausted after ${maxRetries} iterations`, node.position);
     }
 
     return result;
@@ -1125,6 +1165,11 @@ export class Interpreter {
       }
     }
 
+    // Push agent's permissions scope if defined
+    if (def.permissions) {
+      this.permissionsStack.push(def.permissions);
+    }
+
     try {
       let result: OrchidValue = orchidNull();
       for (const stmt of def.body) {
@@ -1138,6 +1183,10 @@ export class Interpreter {
         return e.value;
       }
       throw e;
+    } finally {
+      if (def.permissions) {
+        this.permissionsStack.pop();
+      }
     }
   }
 
@@ -1529,13 +1578,21 @@ export class Interpreter {
     if (!importPath.endsWith('.orch')) {
       importPath += '.orch';
     }
-    const resolved = path.resolve(this.scriptDir, importPath);
+    const resolved = this.resolveImportPath(importPath);
 
     // Check cache — avoid re-executing the same module
-    if (this.importCache.has(resolved)) {
+    if (resolved && this.importCache.has(resolved)) {
       const cachedEnv = this.importCache.get(resolved)!;
       this.mergeImportedBindings(cachedEnv, node.alias, this.globalEnv);
       return orchidNull();
+    }
+
+    if (!resolved) {
+      throw new OrchidError(
+        'ImportError',
+        `Module not found: ${importPath} (from import "${node.path}")`,
+        node.position,
+      );
     }
 
     // Detect circular imports
@@ -1549,7 +1606,7 @@ export class Interpreter {
     }
     this.importStack.add(resolved);
 
-    // Read and parse the source
+    // Read and parse the source (file existence already verified by resolveImportPath)
     if (!fs.existsSync(resolved)) {
       this.importStack.delete(resolved);
       throw new OrchidError(
@@ -1611,12 +1668,16 @@ export class Interpreter {
 
     // Also import any macros/agents defined in the module
     for (const [name, macro] of moduleInterpreter.macros) {
-      const prefixed = node.alias ? `${node.alias}_${name}` : name;
-      this.macros.set(prefixed, macro);
+      // Store with colon syntax for namespace:Operation() resolution
+      const colonPrefixed = node.alias ? `${node.alias}:${name}` : name;
+      this.macros.set(colonPrefixed, macro);
+      // Also store without prefix for direct calls
+      if (!node.alias) this.macros.set(name, macro);
     }
     for (const [name, agent] of moduleInterpreter.agents) {
-      const prefixed = node.alias ? `${node.alias}_${name}` : name;
-      this.agents.set(prefixed, agent);
+      const colonPrefixed = node.alias ? `${node.alias}:${name}` : name;
+      this.agents.set(colonPrefixed, agent);
+      if (!node.alias) this.agents.set(name, agent);
     }
 
     return orchidNull();
@@ -1646,6 +1707,28 @@ export class Interpreter {
         targetEnv.set(name, value);
       }
     }
+  }
+
+  /**
+   * Resolve an import path by searching the script directory first,
+   * then each directory in the ORCHID_PATH environment variable.
+   */
+  private resolveImportPath(importPath: string): string | null {
+    // First try relative to scriptDir
+    const primary = path.resolve(this.scriptDir, importPath);
+    if (fs.existsSync(primary)) return primary;
+
+    // Then search ORCHID_PATH
+    const orchidPath = process.env.ORCHID_PATH;
+    if (orchidPath) {
+      for (const dir of orchidPath.split(path.delimiter)) {
+        if (!dir) continue;
+        const candidate = path.resolve(dir, importPath);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+
+    return null;
   }
 
   // ─── Expression Operators ──────────────────────────────
@@ -1883,6 +1966,16 @@ export class Interpreter {
   private async resolveTags(tags: AST.Tag[], env: Environment): Promise<TagInfo[]> {
     const resolved: TagInfo[] = [];
     for (const t of tags) {
+      // Dynamic tag resolution: <$var> resolves the variable's string value as the tag name
+      if (t.name.startsWith('$')) {
+        const varName = t.name.slice(1);
+        const val = env.get(varName);
+        const resolvedName = val.kind === 'string' ? val.value : valueToString(val);
+        if (resolvedName && resolvedName !== 'null') {
+          resolved.push({ name: resolvedName, value: t.value ? await this.evaluate(t.value, env) : undefined });
+        }
+        continue;
+      }
       const info: TagInfo = { name: t.name };
       if (t.value) {
         info.value = await this.evaluate(t.value, env);
@@ -1903,6 +1996,36 @@ export class Interpreter {
     this.traceLog.push(`[${Date.now() - this.startTime}ms] ${message}`);
     if (this.traceEnabled) {
       console.log(`  [trace] ${message}`);
+    }
+  }
+
+  // ─── Permission Enforcement ─────────────────────────────
+
+  /**
+   * Check whether a namespaced tool call is allowed under the active
+   * agent's permissions block. If no permissions scope is active, all
+   * calls are allowed.
+   */
+  private checkPermission(namespace: string, action: string, position?: AST.Position): void {
+    if (this.permissionsStack.length === 0) return;
+
+    const perms = this.permissionsStack[this.permissionsStack.length - 1];
+    const entry = perms.permissions.find(p => p.namespace === namespace);
+    if (!entry) {
+      throw new OrchidError(
+        'PermissionDenied',
+        `Agent does not have permission to access namespace "${namespace}". Allowed: [${perms.permissions.map(p => p.namespace).join(', ')}]`,
+        position,
+      );
+    }
+
+    // Check if the specific action is allowed (wildcard '*' permits all)
+    if (!entry.actions.includes('*') && !entry.actions.includes(action)) {
+      throw new OrchidError(
+        'PermissionDenied',
+        `Agent does not have permission to call "${namespace}:${action}". Allowed actions: [${entry.actions.join(', ')}]`,
+        position,
+      );
     }
   }
 
@@ -1962,6 +2085,21 @@ export class Interpreter {
         (error) => { clearTimeout(timer); reject(error); },
       );
     });
+  }
+
+  /**
+   * Check if an AST node (typically an until condition) references Confidence().
+   * Used to distinguish LowConfidence errors from generic ValidationErrors.
+   */
+  private nodeReferencesConfidence(node: AST.Node): boolean {
+    if (node.type === 'Operation' && node.name === 'Confidence') return true;
+    if (node.type === 'ComparisonExpression') {
+      return this.nodeReferencesConfidence(node.left) || this.nodeReferencesConfidence(node.right);
+    }
+    if (node.type === 'LogicalExpression') {
+      return this.nodeReferencesConfidence(node.left) || this.nodeReferencesConfidence(node.right);
+    }
+    return false;
   }
 
   // ─── Tag Behaviors ─────────────────────────────────────
@@ -2051,6 +2189,15 @@ export class Interpreter {
             this.implicitContext = await this.mergeValues(this.implicitContext, result);
           } else {
             this.implicitContext = result;
+          }
+          // Track accumulated context size for ContextOverflow detection
+          this.contextSize += valueToString(result).length;
+          if (this.contextSize > this.maxContextSize) {
+            throw new OrchidError(
+              'ContextOverflow',
+              `Accumulated context size (${this.contextSize} chars) exceeds limit (${this.maxContextSize})`,
+              position,
+            );
           }
         }
 

@@ -354,9 +354,18 @@ export class Parser {
       this.expect(TokenType.LBRACKET);
       const actions: string[] = [];
       if (!this.check(TokenType.RBRACKET)) {
-        actions.push(this.expect(TokenType.IDENTIFIER).value);
-        while (this.match(TokenType.COMMA)) {
+        // Accept IDENTIFIER or STAR (*) as action names
+        if (this.check(TokenType.STAR)) {
+          actions.push(this.advance().value);
+        } else {
           actions.push(this.expect(TokenType.IDENTIFIER).value);
+        }
+        while (this.match(TokenType.COMMA)) {
+          if (this.check(TokenType.STAR)) {
+            actions.push(this.advance().value);
+          } else {
+            actions.push(this.expect(TokenType.IDENTIFIER).value);
+          }
         }
       }
       this.expect(TokenType.RBRACKET);

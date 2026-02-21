@@ -1079,6 +1079,7 @@ When `<retry=N>` is exhausted:
 - If `<fallback=X>` is present, the operation returns X silently.
 - If `<best_effort>` is tagged, the operation returns the last attempted result with degraded confidence.
 - Otherwise, a `ValidationError` is raised.
+  - If the `until` condition involves `Confidence()`, a `LowConfidence` error is raised instead.
 
 ---
 
@@ -1117,7 +1118,7 @@ import macros/threat_model.orch as ThreatModel
 import agents/researcher.orch as Researcher
 ```
 
-**Import resolution:** Paths are relative to the importing file. Runtimes may also support a library path (e.g., `ORCHID_PATH` environment variable) for shared macro collections.
+**Import resolution:** Paths are relative to the importing file. If not found locally, the runtime searches each directory in the `ORCHID_PATH` environment variable (colon-separated on Unix, semicolon-separated on Windows) for shared macro collections.
 
 **What can be imported:** Only top-level `macro` and `agent` definitions are exported from a file. Variables, inline operations, and metadata are private to the defining file.
 

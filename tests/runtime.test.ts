@@ -1170,4 +1170,291 @@ g:NonExistent("test")`;
       await interpreter.shutdown();
     });
   });
+
+  // ─── Dynamic tag resolution ───────────────────────────────
+
+  describe('dynamic tag resolution', () => {
+    it('should resolve <$var> tag from variable', async () => {
+      // Use a direct Interpreter to capture tags passed to provider
+      const provider = new ConsoleProvider();
+      let capturedTags: any[] = [];
+      const origExecute = provider.execute.bind(provider);
+      provider.execute = async (op: string, input: string, ctx: any, tags: any[]) => {
+        capturedTags = tags;
+        return origExecute(op, input, ctx, tags);
+      };
+      const source = `mode := "deep"
+result := CoT("analyze this")<$mode>`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({ provider, scriptDir: fixturesDir });
+      await interpreter.run(ast);
+      await interpreter.shutdown();
+      expect(capturedTags).toEqual([{ name: 'deep' }]);
+    });
+
+    it('should skip null dynamic tags', async () => {
+      const source = `result := CoT("analyze this")<$undefined_var>`;
+      const result = await run(source);
+      expect(result.kind).toBe('string');
+      // Should still execute without error, no tag applied
+    });
+
+    it('should combine dynamic and static tags', async () => {
+      const provider = new ConsoleProvider();
+      let capturedTags: any[] = [];
+      const origExecute = provider.execute.bind(provider);
+      provider.execute = async (op: string, input: string, ctx: any, tags: any[]) => {
+        capturedTags = tags;
+        return origExecute(op, input, ctx, tags);
+      };
+      const source = `style := "verbose"
+result := CoT("topic")<quick, $style>`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({ provider, scriptDir: fixturesDir });
+      await interpreter.run(ast);
+      await interpreter.shutdown();
+      expect(capturedTags.map((t: any) => t.name)).toEqual(['quick', 'verbose']);
+    });
+  });
+
+  // ─── Cost() wiring ─────────────────────────────────────────
+
+  describe('Cost() wiring', () => {
+    it('should return 0 for console provider', async () => {
+      const result = await run('cost := Cost()');
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') expect(result.value).toBe(0);
+    });
+
+    it('should return a number', async () => {
+      const result = await run(`Search("test")
+cost := Cost()`);
+      expect(result.kind).toBe('number');
+    });
+  });
+
+  // ─── Save() persistence ─────────────────────────────────────
+
+  describe('Save() persistence', () => {
+    it('should write to file when path argument given', async () => {
+      const fs = require('fs');
+      const tmpPath = '/tmp/orchid-test-save-' + Date.now() + '.txt';
+      const source = `Save("hello save", path="${tmpPath}")`;
+      await run(source);
+      expect(fs.existsSync(tmpPath)).toBe(true);
+      const content = fs.readFileSync(tmpPath, 'utf-8');
+      expect(content).toBe('hello save');
+      fs.unlinkSync(tmpPath);
+    });
+
+    it('should use implicit context when no positional arg', async () => {
+      const fs = require('fs');
+      const tmpPath = '/tmp/orchid-test-save2-' + Date.now() + '.txt';
+      const source = `x := "context value"
+Save(path="${tmpPath}")`;
+      await run(source);
+      expect(fs.existsSync(tmpPath)).toBe(true);
+      const content = fs.readFileSync(tmpPath, 'utf-8');
+      expect(content).toBe('context value');
+      fs.unlinkSync(tmpPath);
+    });
+  });
+
+  // ─── ORCHID_PATH imports ────────────────────────────────────
+
+  describe('ORCHID_PATH for imports', () => {
+    it('should find modules via ORCHID_PATH', async () => {
+      const originalPath = process.env.ORCHID_PATH;
+      process.env.ORCHID_PATH = fixturesDir;
+      try {
+        const source = `import "math_helpers" as math
+result := math.double_val`;
+        const ast = new Parser().parse(new Lexer(source).tokenize());
+        // Use a scriptDir that does NOT contain the module
+        const interpreter = new Interpreter({
+          provider: new ConsoleProvider(),
+          scriptDir: '/tmp',
+        });
+        const result = await interpreter.run(ast);
+        await interpreter.shutdown();
+        expect(result.kind).toBe('number');
+        if (result.kind === 'number') expect(result.value).toBe(2);
+      } finally {
+        if (originalPath !== undefined) {
+          process.env.ORCHID_PATH = originalPath;
+        } else {
+          delete process.env.ORCHID_PATH;
+        }
+      }
+    });
+
+    it('should fail when module not in scriptDir or ORCHID_PATH', async () => {
+      const originalPath = process.env.ORCHID_PATH;
+      delete process.env.ORCHID_PATH;
+      try {
+        const source = `import "nonexistent_module" as m`;
+        const ast = new Parser().parse(new Lexer(source).tokenize());
+        const interpreter = new Interpreter({
+          provider: new ConsoleProvider(),
+          scriptDir: '/tmp',
+        });
+        await expect(interpreter.run(ast)).rejects.toThrow('ImportError');
+        await interpreter.shutdown();
+      } finally {
+        if (originalPath !== undefined) {
+          process.env.ORCHID_PATH = originalPath;
+        } else {
+          delete process.env.ORCHID_PATH;
+        }
+      }
+    });
+  });
+
+  // ─── Import colon namespace syntax ──────────────────────────
+
+  describe('import colon namespace syntax', () => {
+    it('should access imported bindings via member expression', async () => {
+      const source = `import "math_helpers" as math
+result := math.label`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({
+        provider: new ConsoleProvider(),
+        scriptDir: fixturesDir,
+      });
+      const result = await interpreter.run(ast);
+      await interpreter.shutdown();
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('math_helpers loaded');
+    });
+
+    it('should access imported numeric values', async () => {
+      const source = `import "math_helpers" as math
+result := math.triple_val`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({
+        provider: new ConsoleProvider(),
+        scriptDir: fixturesDir,
+      });
+      const result = await interpreter.run(ast);
+      await interpreter.shutdown();
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') expect(result.value).toBe(3);
+    });
+  });
+
+  // ─── Agent permission enforcement ──────────────────────────
+
+  describe('agent permission enforcement', () => {
+    it('should allow permitted namespace operations', async () => {
+      const source = `agent secure_agent(topic):
+    permissions:
+        filesystem: [read_text_file, directory_tree]
+    result := CoT(topic)
+    return result
+x := secure_agent("test")`;
+      const result = await run(source);
+      expect(result.kind).toBe('string');
+    });
+
+    it('should deny unpermitted namespace operations', async () => {
+      const source = `agent locked_agent(topic):
+    permissions:
+        filesystem: [read_text_file]
+    result := github:create_issue(title="test")
+    return result
+x := locked_agent("test")`;
+      await expect(run(source)).rejects.toThrow('PermissionDenied');
+    });
+
+    it('should deny unpermitted actions within a namespace', async () => {
+      const source = `agent limited_agent(topic):
+    permissions:
+        filesystem: [read_text_file]
+    result := filesystem:write_file(path="/tmp/test", content="test")
+    return result
+x := limited_agent("test")`;
+      await expect(run(source)).rejects.toThrow('PermissionDenied');
+    });
+
+    it('should allow wildcard permissions', async () => {
+      const source = `agent open_agent(topic):
+    permissions:
+        filesystem: [*]
+    result := filesystem:write_file(path="/tmp/test", content="test")
+    return result
+x := open_agent("test")`;
+      // Should not throw — wildcard permits all actions
+      const result = await run(source);
+      expect(result.kind).toBe('string');
+    });
+  });
+
+  // ─── DataUnavailable error ──────────────────────────────────
+
+  describe('DataUnavailable error', () => {
+    it('should throw DataUnavailable when search returns empty', async () => {
+      const provider = new ConsoleProvider();
+      // Override search to return empty string
+      provider.search = async () => ({ kind: 'string', value: '' });
+      const ast = new Parser().parse(new Lexer('result := Search("empty query")').tokenize());
+      const interpreter = new Interpreter({ provider, scriptDir: fixturesDir });
+      await expect(interpreter.run(ast)).rejects.toThrow('DataUnavailable');
+      await interpreter.shutdown();
+    });
+
+    it('should throw DataUnavailable when search returns null', async () => {
+      const provider = new ConsoleProvider();
+      provider.search = async () => ({ kind: 'null' });
+      const ast = new Parser().parse(new Lexer('result := Search("empty query")').tokenize());
+      const interpreter = new Interpreter({ provider, scriptDir: fixturesDir });
+      await expect(interpreter.run(ast)).rejects.toThrow('DataUnavailable');
+      await interpreter.shutdown();
+    });
+
+    it('should not throw when search returns content', async () => {
+      const result = await run('result := Search("valid query")');
+      expect(result.kind).toBe('string');
+    });
+  });
+
+  // ─── LowConfidence error ────────────────────────────────────
+
+  describe('LowConfidence error', () => {
+    it('should throw LowConfidence when until-Confidence loop exhausts', async () => {
+      const provider = new ConsoleProvider();
+      provider.setConfidence(0.1); // Always low
+      const source = `draft := CoT("topic")
+until Confidence(draft) > 0.9:
+    draft := Refine(draft)`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({ provider, scriptDir: fixturesDir });
+      await expect(interpreter.run(ast)).rejects.toThrow('LowConfidence');
+      await interpreter.shutdown();
+    });
+
+    it('should throw ValidationError for non-Confidence until loops', async () => {
+      const source = `x := false
+until x:
+    x := false`;
+      await expect(run(source)).rejects.toThrow('ValidationError');
+    });
+  });
+
+  // ─── ContextOverflow error ──────────────────────────────────
+
+  describe('ContextOverflow error', () => {
+    it('should throw ContextOverflow when context exceeds limit', async () => {
+      const provider = new ConsoleProvider();
+      // Override execute to return a massive string (simulate blowup)
+      const bigStr = 'x'.repeat(500_001);
+      provider.execute = async () => ({ kind: 'string', value: bigStr });
+      const source = `a := CoT("topic1")
+b := CoT("topic2")
+c := CoT("topic3")`;
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({ provider, scriptDir: fixturesDir });
+      await expect(interpreter.run(ast)).rejects.toThrow('ContextOverflow');
+      await interpreter.shutdown();
+    });
+  });
 });
