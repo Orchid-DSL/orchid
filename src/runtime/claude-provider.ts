@@ -101,7 +101,9 @@ Identify the most impactful variables and how different values would alter outco
 
   Validate: `You are validating output against acceptance criteria.
 Check whether the input meets the standards implied or stated.
-Be specific about what passes, what fails, and what's borderline.`,
+Start your response with either "PASS" or "FAIL" on the first line.
+Then explain what passes, what fails, and what's borderline.
+Only respond with "PASS" if ALL criteria are fully met.`,
 
   // ── Synthesis ──
   Refine: `You are iteratively refining the input.
@@ -180,6 +182,16 @@ Be transparent about the logic, trade-offs, and alternatives considered.`,
 
   Summarize: `Summarize the following concisely. Capture the essential points
 while minimizing length. Preserve the most important details and conclusions.`,
+
+  Benchmark: `You are evaluating the quality of output against a named metric or criteria.
+Score the output on a scale of 0.0 to 1.0 where:
+- 0.0-0.2: Very poor, fails to meet basic standards
+- 0.2-0.4: Below average, significant gaps
+- 0.4-0.6: Acceptable but with notable weaknesses
+- 0.6-0.8: Good, meets most criteria well
+- 0.8-1.0: Excellent, fully meets or exceeds criteria
+Respond with ONLY a single number between 0.0 and 1.0 on the first line.
+Then optionally explain your scoring rationale.`,
 
   // ── Operators ──
   Merge: `You are synthesizing two sources of information into a unified output.

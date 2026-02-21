@@ -92,6 +92,8 @@ export class Interpreter {
   private readonly maxContextSize = 1_000_000; // 1M chars ≈ ~250K tokens
   /** Runtime confidence signal tracker (spec §8.1). */
   private confidenceTracker: ConfidenceTracker;
+  /** Count of dropped events due to buffer overflow (spec §10.5). */
+  private droppedEvents = 0;
 
   constructor(options: InterpreterOptions) {
     this.provider = options.provider;
@@ -300,6 +302,8 @@ export class Interpreter {
         return this.executeInExpr(node, env);
       case 'MemberExpression':
         return this.executeMemberExpr(node, env);
+      case 'IndexExpression':
+        return this.executeIndexExpr(node as AST.IndexExpression, env);
 
       // Literals
       case 'StringLiteral':
@@ -476,7 +480,13 @@ export class Interpreter {
       for (const entry of this.traceLog) {
         console.log(`  ${entry}`);
       }
-      return orchidString(this.traceLog.join('\n'));
+      if (this.droppedEvents > 0) {
+        console.log(`  [DroppedEvents: ${this.droppedEvents}]`);
+      }
+      const traceOutput = this.droppedEvents > 0
+        ? this.traceLog.join('\n') + `\n[DroppedEvents: ${this.droppedEvents}]`
+        : this.traceLog.join('\n');
+      return orchidString(traceOutput);
     }
 
     if (name === 'Cost') {
@@ -486,7 +496,42 @@ export class Interpreter {
 
     if (name === 'Elapsed') {
       const elapsed = Date.now() - this.startTime;
-      return orchidString(`${elapsed}ms`);
+      return orchidNumber(elapsed);
+    }
+
+    if (name === 'Validate') {
+      const input = await this.resolveArgs(node.args, env);
+      const namedArgs = await this.resolveNamedArgs(node.args, env);
+      const content = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
+      const criteria = namedArgs.has('criteria')
+        ? valueToString(namedArgs.get('criteria')!)
+        : (input.length > 1 ? valueToString(input[1]) : 'meets all requirements');
+      this.status.start(`Validate(${criteria.slice(0, 40)})...`);
+      const result = await this.provider.execute('Validate', content, { criteria }, tags);
+      this.status.succeed(`Validate done`);
+      // Parse the boolean result: look for pass/true/yes vs fail/false/no
+      const text = valueToString(result).toLowerCase();
+      const passes = /\b(pass|true|yes|valid|meets|satisfied|confirmed)\b/.test(text)
+        && !/\b(fail|false|no|invalid|not met|unsatisfied|does not)\b/.test(text);
+      return orchidBoolean(passes);
+    }
+
+    if (name === 'Benchmark') {
+      const input = await this.resolveArgs(node.args, env);
+      const namedArgs = await this.resolveNamedArgs(node.args, env);
+      const content = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
+      const metric = namedArgs.has('metric')
+        ? valueToString(namedArgs.get('metric')!)
+        : (input.length > 1 ? valueToString(input[1]) : 'overall quality');
+      this.status.start(`Benchmark(${metric})...`);
+      const result = await this.provider.execute('Benchmark', content, { metric }, tags);
+      this.status.succeed(`Benchmark done`);
+      // Parse the numeric score from the result
+      const text = valueToString(result);
+      const match = text.match(/([0-9]*\.?[0-9]+)/);
+      const score = match ? parseFloat(match[1]) : 0.5;
+      const clamped = Math.max(0.0, Math.min(1.0, score));
+      return orchidNumber(Math.round(clamped * 100) / 100);
     }
 
     if (name === 'Log') {
@@ -1270,7 +1315,11 @@ export class Interpreter {
       }
       const buf = this.eventBuffer.get(node.event)!;
       buf.push(payload);
-      if (buf.length > 1000) buf.shift(); // Spec: drop oldest on overflow
+      if (buf.length > 1000) {
+        buf.shift();
+        this.droppedEvents++;
+        if (this.traceEnabled) this.trace(`Event buffer overflow for "${node.event}" — dropped oldest (${this.droppedEvents} total dropped)`);
+      }
     }
 
     return orchidNull();
@@ -1929,6 +1978,36 @@ export class Interpreter {
     return orchidNull();
   }
 
+  private async executeIndexExpr(node: AST.IndexExpression, env: Environment): Promise<OrchidValue> {
+    const obj = await this.evaluate(node.object, env);
+    const idx = await this.evaluate(node.index, env);
+
+    if (obj.kind === 'list' && idx.kind === 'number') {
+      const i = Math.floor(idx.value);
+      // Support negative indexing: list[-1] = last element
+      const normalizedIdx = i < 0 ? obj.elements.length + i : i;
+      if (normalizedIdx >= 0 && normalizedIdx < obj.elements.length) {
+        return obj.elements[normalizedIdx];
+      }
+      return orchidNull();
+    }
+
+    if (obj.kind === 'dict' && idx.kind === 'string') {
+      return obj.entries.get(idx.value) || orchidNull();
+    }
+
+    if (obj.kind === 'string' && idx.kind === 'number') {
+      const i = Math.floor(idx.value);
+      const normalizedIdx = i < 0 ? obj.value.length + i : i;
+      if (normalizedIdx >= 0 && normalizedIdx < obj.value.length) {
+        return orchidString(obj.value[normalizedIdx]);
+      }
+      return orchidNull();
+    }
+
+    return orchidNull();
+  }
+
   // ─── Literals ──────────────────────────────────────────
 
   private async executeInterpolatedString(node: AST.InterpolatedString, env: Environment): Promise<OrchidValue> {
@@ -2235,6 +2314,7 @@ export class Interpreter {
     // <retry=N>: determine retry count
     const retryVal = this.getTagValue(tags, 'retry');
     const maxAttempts = retryVal && retryVal.kind === 'number' ? retryVal.value : 1;
+    const useBackoff = this.hasTag(tags, 'backoff');
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -2284,6 +2364,12 @@ export class Interpreter {
         }
         if (attempt < maxAttempts - 1) {
           this.confidenceTracker.recordRetry();
+          // <backoff>: exponential backoff between retries (1s, 2s, 4s, ...)
+          if (useBackoff) {
+            const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+            if (this.traceEnabled) this.trace(`Backoff ${delayMs}ms before retry ${attempt + 2}/${maxAttempts} for ${operationName}`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
           if (this.traceEnabled) this.trace(`Retry ${attempt + 1}/${maxAttempts} for ${operationName}`);
         }
       }

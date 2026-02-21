@@ -1571,4 +1571,98 @@ verified_conf := Confidence(verified)`;
       }
     });
   });
+
+  describe('v1 polish: meta operations return types', () => {
+    it('Elapsed() should return a number', async () => {
+      const result = await run('t := Elapsed()');
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') {
+        expect(result.value).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('Benchmark() should return a number between 0.0 and 1.0', async () => {
+      const result = await run('score := Benchmark("test quality")');
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') {
+        expect(result.value).toBeGreaterThanOrEqual(0.0);
+        expect(result.value).toBeLessThanOrEqual(1.0);
+      }
+    });
+
+    it('Validate() should return a boolean', async () => {
+      const result = await run('ok := Validate("test content")');
+      expect(result.kind).toBe('boolean');
+    });
+
+    it('Validate() with criteria should return a boolean', async () => {
+      const result = await run('ok := Validate("content", criteria="is valid")');
+      expect(result.kind).toBe('boolean');
+    });
+  });
+
+  describe('v1 polish: index subscript access', () => {
+    it('should access list elements by index', async () => {
+      const result = await run(`items := [10, 20, 30]
+val := items[1]`);
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') expect(result.value).toBe(20);
+    });
+
+    it('should access list elements with negative index', async () => {
+      const result = await run(`items := [10, 20, 30]
+val := items[-1]`);
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') expect(result.value).toBe(30);
+    });
+
+    it('should access dict values by string key', async () => {
+      const result = await run(`d := {name: "alice", age: 30}
+val := d["name"]`);
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('alice');
+    });
+
+    it('should access string characters by index', async () => {
+      const result = await run(`s := "hello"
+c := s[0]`);
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('h');
+    });
+
+    it('should return null for out of range index', async () => {
+      const result = await run(`items := [1, 2, 3]
+val := items[10]`);
+      expect(result.kind).toBe('null');
+    });
+  });
+
+  describe('v1 polish: event buffer overflow', () => {
+    it('should track dropped events and report in Trace()', async () => {
+      const provider = new ConsoleProvider();
+      // Build a script that emits >1000 events without a handler to trigger overflow
+      // emit syntax: emit eventname (payload)
+      let source = '@orchid 0.1\n';
+      for (let i = 0; i < 1010; i++) {
+        source += `emit overflow_test(${i})\n`;
+      }
+      source += 'trace_out := Trace()\n';
+      const ast = new Parser().parse(new Lexer(source).tokenize());
+      const interpreter = new Interpreter({ provider, trace: true, scriptDir: fixturesDir });
+      const result = await interpreter.run(ast);
+      await interpreter.shutdown();
+      // The trace output should mention dropped events
+      if (result.kind === 'string') {
+        expect(result.value).toContain('DroppedEvents');
+      }
+    });
+  });
+
+  describe('v1 polish: backoff tag', () => {
+    it('should accept backoff tag on operations with retry', async () => {
+      // Just verify it parses and runs without error — the actual delay is minimal in tests
+      const result = await run('result := CoT("test")<retry=2, backoff>');
+      expect(result.kind).toBe('string');
+    });
+  });
 });
