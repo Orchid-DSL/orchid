@@ -131,6 +131,22 @@ sources := ["arxiv", "pubmed", "semantic_scholar"]
 weights := {relevance: 0.7, recency: 0.3}
 ```
 
+### 2.4 Index Access
+
+List, dict, and string values support subscript access with brackets. Negative indices count from the end. Out-of-range access returns `null`.
+
+```orchid
+results := [10, 20, 30]
+first := results[0]                     # 10
+last := results[-1]                     # 30
+
+config := {model: "claude", temp: 0.7}
+name := config["model"]                 # "claude"
+
+greeting := "hello"
+ch := greeting[0]                       # "h"
+```
+
 ---
 
 ## 3. Blocks and Scope
@@ -389,7 +405,7 @@ Reasoning macros are named cognitive operations that shape *how the agent reason
 | `Steelman`         | `Steelman(argument)`          | Construct the strongest version of an argument.         |
 | `DevilsAdvocate`   | `DevilsAdvocate(position)`    | Argue against a position regardless of agreement.       |
 | `Counterfactual`   | `Counterfactual(scenario)`    | What-if analysis. Explore alternate outcomes.           |
-| `Validate`         | `Validate(output, criteria)`  | Check output against explicit acceptance criteria.      |
+| `Validate`         | `Validate(output, criteria)`  | Check output against explicit acceptance criteria. Returns boolean. |
 
 ### 5.3 Synthesis Macros
 
@@ -499,6 +515,18 @@ Operation("args")<tag>
 Operation("args")<tag1, tag2>
 ```
 
+#### Dynamic Tag Resolution
+
+Tag names can be resolved dynamically from variables using the `$` prefix. If the variable is unset or null, the tag is silently skipped.
+
+```orchid
+mode := "deep"
+CoT("analysis")<$mode>                # equivalent to CoT("analysis")<deep>
+
+tags := "strict"
+Validate(output)<$tags, cite>         # mixes dynamic and static tags
+```
+
 ### 6.1 Execution Tags
 
 | Tag              | Description                                                              |
@@ -514,7 +542,8 @@ Operation("args")<tag1, tag2>
 
 | Tag              | Description                                                              |
 |------------------|--------------------------------------------------------------------------|
-| `<retry>`        | Retry on failure. `<retry=3>` for max attempts, `<retry=3, backoff>`.   |
+| `<retry>`        | Retry on failure. `<retry=3>` for max attempts.                         |
+| `<backoff>`      | Use with `<retry>`. Exponential delay between attempts (1s, 2s, 4s... capped at 30s). |
 | `<timeout=Ns>`   | Abort and return partial results after N seconds.                        |
 | `<pure>`         | No side effects. Safe to re-execute; runtime may cache and deduplicate.  |
 | `<cached>`       | Use cached results if available and fresh.                               |
@@ -633,13 +662,14 @@ Meta operations provide introspection and control over execution.
 |---------------------|----------------------------------|----------------------------------------------------------|
 | `Explain`           | `Explain(step)`                  | Justify reasoning for a specific step or decision.       |
 | `Confidence`        | `Confidence(scope?)`             | Self-assess certainty (0.0-1.0). Optional scope.        |
-| `Benchmark`         | `Benchmark(output, metric)`      | Evaluate output quality against named criteria.          |
+| `Benchmark`         | `Benchmark(output, metric)`      | Evaluate output quality against named criteria (returns 0.0-1.0). |
 | `Trace`             | `Trace(depth?)`                  | Emit execution history. Depth controls granularity.      |
 | `Checkpoint`        | `Checkpoint(label?)`             | Save current agent state for potential rollback.         |
 | `Rollback`          | `Rollback(target)`               | Revert to a checkpoint by label or step count.           |
 | `Reflect`           | `Reflect(process)`               | Meta-cognitive review of the agent's own approach.       |
 | `Cost`              | `Cost()`                         | Report estimated token/compute cost so far.              |
-| `Elapsed`           | `Elapsed()`                      | Wall-clock time since execution began.                   |
+| `Elapsed`           | `Elapsed()`                      | Wall-clock time since execution began (returns ms).      |
+| `Save`              | `Save(content, path?)`           | Write content to file at path, or stdout if no path.     |
 
 ```orchid
 Checkpoint("pre_analysis")
@@ -1364,7 +1394,7 @@ args           ::= arg (',' arg)*
 arg            ::= expression | IDENTIFIER '=' expression
 
 tags           ::= '<' tag (',' tag)* '>'
-tag            ::= IDENTIFIER ('=' value)?
+tag            ::= IDENTIFIER ('=' value)? | '$' IDENTIFIER
 
 atomic_block   ::= '###' NEWLINE statement* '###'
 
@@ -1466,7 +1496,7 @@ The following macros are available in all Orchid environments without import:
 **Synthesis:** Refine, Consensus, Debate, Synthesize, Reconcile, Prioritize
 **Communication:** ELI5, Formal, Analogize, Socratic, Narrate, Translate
 **Generative:** Creative, Brainstorm, Abstract, Ground, Reframe
-**Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Cost, Elapsed
+**Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Cost, Elapsed, Save
 
 ## Appendix C: Comparison with Existing Approaches
 

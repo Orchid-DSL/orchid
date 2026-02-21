@@ -33,10 +33,11 @@ orchid/
 │       ├── mcp-registry.ts            # Built-in MCP server catalog (12 servers)
 │       ├── mcp-remote-registry.ts     # npm search for MCP packages
 │       ├── mcp-install.ts             # Auto-install MCP servers from scripts
+│       ├── confidence.ts               # Runtime confidence signal tracker
 │       ├── config.ts                   # orchid.config.json loading
 │       ├── plugin.ts                   # JS/TS plugin interface
 │       └── status.ts                   # Terminal spinner/status display
-├── tests/                              # Jest test suites (12 files, ~3900 lines)
+├── tests/                              # Jest test suites (13 files, ~5000 lines)
 ├── examples/                           # .orch example scripts (8 files)
 ├── docs/
 │   └── specification.md                # Full language specification with EBNF grammar
@@ -89,7 +90,7 @@ The runtime auto-connects to configured MCP servers on first use. Configuration 
 ```bash
 npm install              # install dependencies
 npm run build            # compile TypeScript → dist/
-npm test                 # run all 319+ tests (Jest)
+npm test                 # run all 440+ tests (Jest)
 npm run lint             # type-check without emitting
 ```
 
@@ -137,6 +138,7 @@ node dist/cli.js --parse examples/deep_research.orch
 | `mcp-remote-registry.test.ts` | npm search and catalog caching |
 | `config.test.ts` | Config file loading and merging |
 | `plugin.test.ts` | JS/TS plugin loading and lifecycle |
+| `confidence.test.ts` | Runtime confidence signal tracking and blending |
 | `e2e-cli.test.ts` | CLI end-to-end tests (parse, lex, execute) |
 
 ## Language Quick Reference
@@ -148,7 +150,7 @@ node dist/cli.js --parse examples/deep_research.orch
 **Synthesis:** `Refine`, `Consensus`, `Debate`, `Synthesize`, `Reconcile`, `Prioritize`
 **Communication:** `ELI5`, `Formal`, `Analogize`, `Socratic`, `Narrate`, `Translate`
 **Generative:** `Creative`, `Brainstorm`, `Abstract`, `Ground`, `Reframe`
-**Meta:** `Reflect`, `Explain`, `Summarize`, `Confidence`, `Trace`, `Cost`, `Checkpoint`, `Rollback`
+**Meta:** `Reflect`, `Explain`, `Summarize`, `Confidence`, `Trace`, `Cost`, `Checkpoint`, `Rollback`, `Save`
 
 ### Operators
 
@@ -194,6 +196,16 @@ content := filesystem:read_text_file(path="README.md")
 filesystem:write_file(path="out.md", content=result)
 ```
 
+### Index Access
+
+```orchid
+items := [10, 20, 30]
+first := items[0]                     # list indexing (supports negative: items[-1])
+d := {name: "alice", age: 30}
+val := d["name"]                      # dict key access
+ch := "hello"[0]                      # string character access
+```
+
 ### Bracket-Count Syntax
 
 Some macros accept a count parameter: `Debate[3]("topic")`, `Brainstorm[10]("ideas")`. See specification.md §5.6.
@@ -219,6 +231,10 @@ CoT("analysis")<$mode>                # dynamic tag resolution from variable
 - Agent `permissions:` blocks are enforced at runtime (namespace and action-level)
 - `Save(content, path="file.txt")` writes to disk; `Save(content)` writes to stdout
 - `Cost()` returns actual token count from the provider (0 for ConsoleProvider)
+- `Benchmark()` returns a number (0.0–1.0); `Validate()` returns a boolean; `Elapsed()` returns milliseconds as a number
+- `Confidence()` uses a hybrid model: 50% provider score + 50% runtime signals (retries, errors, sources, CoVe, fork agreement)
+- `<backoff>` tag enables exponential delay between retries (e.g., `<retry=3, backoff>`)
+- `list[0]`, `dict["key"]`, `string[0]` subscript access is supported (including negative indexing)
 - `DataUnavailable`, `LowConfidence`, `ContextOverflow` errors are thrown at runtime
 
 ## Common Tasks
