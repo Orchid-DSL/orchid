@@ -285,6 +285,32 @@ describe('Runtime', () => {
       expect(result.kind).toBe('list');
       if (result.kind === 'list') expect(result.elements).toHaveLength(2);
     });
+
+    it('should warn when fork[n] count mismatches actual branches', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const source = `results := fork[5]:
+    Search("a")
+    Search("b")`;
+      const result = await run(source);
+      expect(result.kind).toBe('list');
+      if (result.kind === 'list') expect(result.elements).toHaveLength(2);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('fork[5] declares 5 branches but 2 found'),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('should not warn when fork[n] count matches', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const source = `results := fork[2]:
+    Search("a")
+    Search("b")`;
+      await run(source);
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('fork['),
+      );
+      warnSpy.mockRestore();
+    });
   });
 
   describe('atomic blocks', () => {
@@ -357,6 +383,65 @@ result := Greet("Bob")`;
       const result = await run('data := {name: "test", value: 42}\nx := data.name');
       expect(result.kind).toBe('string');
       if (result.kind === 'string') expect(result.value).toBe('test');
+    });
+  });
+
+  describe('index access', () => {
+    it('should index into lists', async () => {
+      const result = await run('items := ["a", "b", "c"]\nx := items[1]');
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('b');
+    });
+
+    it('should support negative list indexing', async () => {
+      const result = await run('items := ["a", "b", "c"]\nx := items[-1]');
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('c');
+    });
+
+    it('should index into strings', async () => {
+      const result = await run('s := "hello"\nc := s[0]');
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('h');
+    });
+
+    it('should support negative string indexing', async () => {
+      const result = await run('s := "hello"\nc := s[-1]');
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('o');
+    });
+
+    it('should index into dicts with string keys', async () => {
+      const result = await run('data := {name: "test", value: 42}\nx := data["name"]');
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('test');
+    });
+
+    it('should return null for missing dict keys', async () => {
+      const result = await run('data := {a: 1}\nx := data["missing"]');
+      expect(result.kind).toBe('null');
+    });
+
+    it('should throw on out-of-range list index', async () => {
+      await expect(run('items := ["a"]\nx := items[5]'))
+        .rejects.toThrow('out of range');
+    });
+
+    it('should throw on out-of-range negative list index', async () => {
+      await expect(run('items := ["a"]\nx := items[-5]'))
+        .rejects.toThrow('out of range');
+    });
+
+    it('should support chained index access', async () => {
+      const result = await run('matrix := [["a", "b"], ["c", "d"]]\nx := matrix[1][0]');
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('c');
+    });
+
+    it('should support index access on expressions', async () => {
+      const result = await run('data := {items: ["x", "y"]}\nx := data.items[1]');
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('y');
     });
   });
 
@@ -582,6 +667,30 @@ events := Stream("Alert")`;
         expect(result.elements).toHaveLength(0);
       }
     });
+
+    it('Stream() should consume the buffer (second call returns empty)', async () => {
+      const source = `emit Alert("one")
+emit Alert("two")
+first := Stream("Alert")
+second := Stream("Alert")`;
+      const result = await run(source);
+      // second call should return empty since first consumed the buffer
+      expect(result.kind).toBe('list');
+      if (result.kind === 'list') {
+        expect(result.elements).toHaveLength(0);
+      }
+    });
+
+    it('Stream() should wrap non-list non-string in single-element list', async () => {
+      const source = `x := 42
+result := Stream(x)`;
+      const result = await run(source);
+      expect(result.kind).toBe('list');
+      if (result.kind === 'list') {
+        expect(result.elements).toHaveLength(1);
+        expect(result.elements[0].kind).toBe('number');
+      }
+    });
   });
 
   // ─── Atomic block transactional rollback ──────────────────
@@ -657,6 +766,57 @@ events := Stream("Survived")`;
       if (result.kind === 'list') {
         expect(result.elements).toHaveLength(1);
       }
+    });
+
+    it('should handle nested atomic blocks — inner fails, outer commits', async () => {
+      const source = `x := "original"
+###
+x := "outer"
+try:
+    ###
+    x := "inner"
+    assert false, "inner boom"
+    ###
+except:
+    pass := true
+###
+result := x`;
+      const result = await run(source);
+      // Inner block rolled back x to "outer", outer block committed "outer"
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('outer');
+    });
+
+    it('should handle nested atomic blocks — both succeed', async () => {
+      const source = `###
+x := "outer"
+###
+###
+y := "inner"
+###
+result := x * " " * y`;
+      // Both blocks commit their bindings; * is string concatenation
+      const result = await run(source);
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('outer inner');
+    });
+
+    it('should roll back listener registrations on error', async () => {
+      const source = `count := 0
+try:
+    ###
+    on RolledBackEvent as e:
+        count := count + 1
+    assert false, "boom"
+    ###
+except:
+    pass := true
+emit RolledBackEvent("test")
+result := count`;
+      const result = await run(source);
+      // The on handler registered inside the failed atomic block should be rolled back
+      expect(result.kind).toBe('number');
+      if (result.kind === 'number') expect(result.value).toBe(0);
     });
   });
 

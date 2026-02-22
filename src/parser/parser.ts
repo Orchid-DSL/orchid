@@ -711,7 +711,8 @@ export class Parser {
   private parsePostfix(): AST.Node {
     let node = this.parsePrimary();
 
-    // Handle member access (dot notation), call syntax, and tags
+    // Handle member access (dot notation), index access (bracket notation),
+    // call syntax, and tags
     while (true) {
       if (this.check(TokenType.DOT)) {
         this.advance();
@@ -720,6 +721,17 @@ export class Parser {
           type: 'MemberExpression',
           object: node,
           property: prop,
+          position: node.position,
+        };
+      } else if (this.check(TokenType.LBRACKET)) {
+        // Index access: expr[index]
+        this.advance();
+        const index = this.parseExpression();
+        this.expect(TokenType.RBRACKET);
+        node = {
+          type: 'IndexExpression',
+          object: node,
+          index,
           position: node.position,
         };
       } else if (this.check(TokenType.LPAREN) && node.type === 'Identifier') {
@@ -921,56 +933,8 @@ export class Parser {
       };
     }
 
-    // Check for bracket notation: Identifier[n]
-    if (this.check(TokenType.LBRACKET)) {
-      const savedPos = this.pos;
-      this.advance();
-      if (this.check(TokenType.NUMBER)) {
-        const count = this.advance().value;
-        this.expect(TokenType.RBRACKET);
-        // This is like Brainstorm[10](topic) or Debate[3](prop)
-        if (this.match(TokenType.LPAREN)) {
-          const args = this.parseArgList();
-          this.expect(TokenType.RPAREN);
-          const tags = this.parseTags();
-          // Encode the count as a special arg
-          const countArg: AST.Argument = {
-            name: '_count',
-            value: {
-              type: 'NumberLiteral',
-              value: parseFloat(count),
-              raw: count,
-              position: pos,
-            },
-          };
-          return {
-            type: 'Operation',
-            name,
-            args: [countArg, ...args],
-            tags,
-            position: pos,
-          };
-        }
-        // Just Identifier[n] without call
-        return {
-          type: 'Operation',
-          name,
-          args: [{
-            name: '_count',
-            value: {
-              type: 'NumberLiteral',
-              value: parseFloat(count),
-              raw: count,
-              position: pos,
-            },
-          }],
-          tags: [],
-          position: pos,
-        };
-      }
-      // Not a count bracket, might be subscript - restore
-      this.pos = savedPos;
-    }
+    // Square brackets after identifiers are always index access (handled by parsePostfix).
+    // Operation counts use a named parameter: Brainstorm("topic", count=10)
 
     // Check for tags on bare identifier (operation without parens, e.g., CoVe<deep>)
     const tags = this.parseTags();

@@ -291,6 +291,8 @@ export class Interpreter {
         return this.executeInExpr(node, env);
       case 'MemberExpression':
         return this.executeMemberExpr(node, env);
+      case 'IndexExpression':
+        return this.executeIndexExpr(node, env);
 
       // Literals
       case 'StringLiteral':
@@ -448,10 +450,6 @@ export class Interpreter {
       return orchidString(this.traceLog.join('\n'));
     }
 
-    if (name === 'Cost') {
-      return orchidString(`[Cost: estimated tokens used in session]`);
-    }
-
     if (name === 'Elapsed') {
       const elapsed = Date.now() - this.startTime;
       return orchidString(`${elapsed}ms`);
@@ -539,19 +537,12 @@ export class Interpreter {
         inputStr = valueToString(primary);
       }
 
-      // Build context from keyword args
+      // Build context from keyword args (count= becomes context['count'] for providers)
       const context: Record<string, string> = {};
       for (const arg of node.args) {
-        if (arg.name && arg.name !== '_count') {
+        if (arg.name) {
           context[arg.name] = valueToString(await this.evaluate(arg.value, env));
         }
-      }
-
-      // Handle _count for Brainstorm[n], Debate[n], etc.
-      const countArg = node.args.find(a => a.name === '_count');
-      if (countArg) {
-        const countVal = await this.evaluate(countArg.value, env);
-        context['_count'] = valueToString(countVal);
       }
 
       // <isolated>: pass empty context to provider
@@ -1002,6 +993,15 @@ export class Interpreter {
     // Named or unnamed branches
     const isNamed = node.branches.some(b => b.name);
     const branchCount = node.branches.length;
+
+    // Validate fork[n] count if specified
+    if (node.count !== undefined && node.count !== branchCount) {
+      console.warn(
+        `[warn] fork[${node.count}] declares ${node.count} branches but ${branchCount} found` +
+        (node.position ? ` (line ${node.position.line})` : ''),
+      );
+    }
+
     const branchLabel = isNamed
       ? node.branches.map(b => b.name).join(', ')
       : `${branchCount} branches`;
@@ -1861,6 +1861,47 @@ export class Interpreter {
     return orchidNull();
   }
 
+  private async executeIndexExpr(node: AST.IndexExpression, env: Environment): Promise<OrchidValue> {
+    const obj = await this.evaluate(node.object, env);
+    const idx = await this.evaluate(node.index, env);
+
+    if (obj.kind === 'list') {
+      if (idx.kind !== 'number') {
+        throw new OrchidError('TypeError', `List index must be a number, got ${idx.kind}`, node.position);
+      }
+      const i = Math.trunc(idx.value);
+      const len = obj.elements.length;
+      // Support negative indexing: list[-1] is the last element
+      const resolved = i < 0 ? len + i : i;
+      if (resolved < 0 || resolved >= len) {
+        throw new OrchidError('RuntimeError', `List index ${i} out of range (length ${len})`, node.position);
+      }
+      return obj.elements[resolved];
+    }
+
+    if (obj.kind === 'string') {
+      if (idx.kind !== 'number') {
+        throw new OrchidError('TypeError', `String index must be a number, got ${idx.kind}`, node.position);
+      }
+      const i = Math.trunc(idx.value);
+      const len = obj.value.length;
+      const resolved = i < 0 ? len + i : i;
+      if (resolved < 0 || resolved >= len) {
+        throw new OrchidError('RuntimeError', `String index ${i} out of range (length ${len})`, node.position);
+      }
+      return orchidString(obj.value[resolved]);
+    }
+
+    if (obj.kind === 'dict') {
+      if (idx.kind !== 'string') {
+        throw new OrchidError('TypeError', `Dict key must be a string, got ${idx.kind}`, node.position);
+      }
+      return obj.entries.get(idx.value) || orchidNull();
+    }
+
+    throw new OrchidError('TypeError', `Cannot index into ${obj.kind}`, node.position);
+  }
+
   // ─── Literals ──────────────────────────────────────────
 
   private async executeInterpolatedString(node: AST.InterpolatedString, env: Environment): Promise<OrchidValue> {
@@ -1905,9 +1946,7 @@ export class Interpreter {
   private async resolveArgs(args: AST.Argument[], env: Environment): Promise<OrchidValue[]> {
     const results: OrchidValue[] = [];
     for (const arg of args) {
-      if (!arg.name || arg.name === '_count') {
-        // Skip named args for positional resolution, but include _count
-        if (arg.name === '_count') continue;
+      if (!arg.name) {
         results.push(await this.evaluate(arg.value, env));
       } else {
         results.push(await this.evaluate(arg.value, env));
@@ -1919,7 +1958,7 @@ export class Interpreter {
   private async resolveNamedArgs(args: AST.Argument[], env: Environment): Promise<Map<string, OrchidValue>> {
     const named = new Map<string, OrchidValue>();
     for (const arg of args) {
-      if (arg.name && arg.name !== '_count') {
+      if (arg.name) {
         named.set(arg.name, await this.evaluate(arg.value, env));
       }
     }
@@ -2067,9 +2106,10 @@ export class Interpreter {
       }
     }
 
-    // <retry=N>: determine retry count
+    // <retry=N>: determine retry count; <backoff>: exponential backoff between retries
     const retryVal = this.getTagValue(tags, 'retry');
     const maxAttempts = retryVal && retryVal.kind === 'number' ? retryVal.value : 1;
+    const useBackoff = this.hasTag(tags, 'backoff');
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -2108,6 +2148,11 @@ export class Interpreter {
         }
         if (attempt < maxAttempts - 1) {
           if (this.traceEnabled) this.trace(`Retry ${attempt + 1}/${maxAttempts} for ${operationName}`);
+          if (useBackoff) {
+            // Exponential backoff: 100ms, 200ms, 400ms, 800ms, ...
+            const delay = 100 * Math.pow(2, attempt);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         }
       }
     }

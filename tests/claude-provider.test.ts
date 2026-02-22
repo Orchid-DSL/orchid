@@ -123,12 +123,12 @@ describe('ClaudeProvider', () => {
       }
     });
 
-    it('should respect _count for list operations', async () => {
+    it('should respect count for list operations', async () => {
       mockCreate.mockResolvedValue(
         mockResponse('["a", "b", "c", "d", "e"]'),
       );
 
-      const result = await provider.execute('Brainstorm', 'ideas', { _count: '3' }, []);
+      const result = await provider.execute('Brainstorm', 'ideas', { count: '3' }, []);
 
       expect(result.kind).toBe('list');
       if (result.kind === 'list') {

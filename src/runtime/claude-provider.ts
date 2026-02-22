@@ -211,6 +211,7 @@ const TAG_MODIFIERS: Record<string, string> = {
   best_effort: 'Do your best with available information. Partial or degraded results are acceptable — do not fail.',
   // Output tags
   verbose: 'Include your full reasoning trace in the output, not just the conclusion. Show all intermediate steps.',
+  terse: 'Be as brief as possible. One or two sentences maximum. Strip all filler, hedging, and elaboration.',
   raw: 'Return your unprocessed output. Do not summarize, format, or restructure. Provide the raw analysis.',
   cite: 'Require source attribution for all claims. Every factual statement must include where it comes from.',
   // Style tags
@@ -506,8 +507,8 @@ ${this.buildTagModifiers(tags)}`;
   private buildUserMessage(input: string, context: Record<string, string>): string {
     let message = input;
 
-    // Append relevant context as structured information
-    const contextEntries = Object.entries(context).filter(([k]) => k !== '_count');
+    // Append relevant context as structured information (count is passed to provider but not shown in message)
+    const contextEntries = Object.entries(context).filter(([k]) => k !== 'count');
     if (contextEntries.length > 0) {
       message += '\n\nAdditional context:';
       for (const [key, value] of contextEntries) {
@@ -549,7 +550,7 @@ ${this.buildTagModifiers(tags)}`;
     operation: string,
     context: Record<string, string>,
   ): OrchidValue {
-    const requestedCount = context['_count'] ? parseInt(context['_count']) : undefined;
+    const requestedCount = context['count'] ? parseInt(context['count']) : undefined;
 
     // Try to parse as JSON array
     try {

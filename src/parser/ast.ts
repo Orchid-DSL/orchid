@@ -34,6 +34,7 @@ export type Node =
   | Identifier
   | ImplicitContext
   | MemberExpression
+  | IndexExpression
   | ComparisonExpression
   | LogicalExpression
   | UnaryExpression
@@ -332,6 +333,12 @@ export interface MemberExpression extends BaseNode {
   type: 'MemberExpression';
   object: Node;
   property: string;
+}
+
+export interface IndexExpression extends BaseNode {
+  type: 'IndexExpression';
+  object: Node;
+  index: Node;
 }
 
 export interface SectionComment extends BaseNode {

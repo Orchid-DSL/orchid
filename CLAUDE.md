@@ -148,7 +148,7 @@ node dist/cli.js --parse examples/deep_research.orch
 **Synthesis:** `Refine`, `Consensus`, `Debate`, `Synthesize`, `Reconcile`, `Prioritize`
 **Communication:** `ELI5`, `Formal`, `Analogize`, `Socratic`, `Narrate`, `Translate`
 **Generative:** `Creative`, `Brainstorm`, `Abstract`, `Ground`, `Reframe`, `Generate`
-**Meta:** `Reflect`, `Explain`, `Summarize`, `Confidence`, `Trace`, `Cost`
+**Meta:** `Reflect`, `Explain`, `Summarize`, `Confidence`, `Trace`
 
 ### Operators
 

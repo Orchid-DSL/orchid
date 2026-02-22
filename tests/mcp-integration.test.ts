@@ -7,16 +7,11 @@
  *
  * Run with:
  *   npm test -- --testPathPattern=mcp-integration
- *
- * Skipped by default in CI. Set MCP_INTEGRATION=1 to enable.
  */
 
 import * as path from 'path';
 import { MCPManager, OrchidConfig, MCPError } from '../src/runtime/mcp-manager';
 import { orchidString, orchidNumber, valueToString } from '../src/runtime/values';
-
-const SKIP = !process.env.MCP_INTEGRATION;
-const describeIntegration = SKIP ? describe.skip : describe;
 
 const SERVER_PATH = path.resolve(__dirname, 'fixtures/echo-mcp-server.js');
 
@@ -30,7 +25,7 @@ const config: OrchidConfig = {
   },
 };
 
-describeIntegration('MCP Integration (live server)', () => {
+describe('MCP Integration (live server)', () => {
   let manager: MCPManager;
 
   beforeAll(async () => {
@@ -228,15 +223,5 @@ describeIntegration('MCP Integration (live server)', () => {
       });
       expect(valueToString(result)).toBe('back online');
     }, 15_000);
-  });
-});
-
-// Guard test so Jest doesn't report "no tests" when skipping
-describe('MCP Integration (skip guard)', () => {
-  it('should be run with MCP_INTEGRATION=1', () => {
-    if (SKIP) {
-      console.log('Skipping MCP integration tests. Set MCP_INTEGRATION=1 to run.');
-    }
-    expect(true).toBe(true);
   });
 });

@@ -17,7 +17,7 @@ export const BUILTIN_MACROS = new Set([
   'Creative', 'Brainstorm', 'Abstract', 'Ground', 'Reframe', 'Generate',
   // Meta
   'Explain', 'Confidence', 'Benchmark', 'Trace', 'Checkpoint', 'Rollback',
-  'Reflect', 'Cost', 'Elapsed',
+  'Reflect', 'Elapsed',
   // Utility
   'Search', 'Summarize',
   // Built-in functions
@@ -29,7 +29,7 @@ export const BUILTIN_MACROS = new Set([
  */
 export const META_OPERATIONS = new Set([
   'Confidence', 'Benchmark', 'Trace', 'Checkpoint', 'Rollback',
-  'Cost', 'Elapsed', 'Explain', 'Reflect',
+  'Elapsed', 'Explain', 'Reflect',
 ]);
 
 /**
@@ -77,7 +77,6 @@ export function describeBuiltin(name: string): string {
     Checkpoint: 'Save current agent state for potential rollback.',
     Rollback: 'Revert to a checkpoint.',
     Reflect: "Meta-cognitive review of the agent's own approach.",
-    Cost: 'Report estimated token/compute cost so far.',
     Elapsed: 'Wall-clock time since execution began.',
     Search: 'Search for information on a topic.',
     Summarize: 'Compress context into a summary.',

@@ -1,0 +1,22 @@
+@orchid 0.1
+@name "Parallel Map with Fork"
+@description "Demonstrates fork-as-parallel-map: processing a list of items concurrently."
+
+# ── Define a batch of topics to research ────────────────
+topics := ["quantum computing", "gene therapy", "fusion energy", "asteroid mining"]
+
+# ── Fork over the list: each item processed in parallel ─
+summaries := fork:
+    for topic in topics:
+        raw := Search("$topic recent breakthroughs")
+        vetted := CoVe(raw)
+        CoT("summarize key developments in $topic based on:\n$vetted")
+
+# summaries is a list (one result per topic)
+Log("Processed all topics. Results:")
+for summary in summaries:
+    Log(summary)
+
+# ── Synthesize everything into a unified report ─────────
+report := Synthesize(summaries)
+Formal(report)

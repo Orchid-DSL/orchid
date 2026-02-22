@@ -113,7 +113,7 @@ export class ConsoleProvider implements OrchidProvider {
     // Operations that naturally produce lists return list values
     const listOps = new Set(['Decompose', 'Brainstorm', 'Classify']);
     if (listOps.has(operation)) {
-      const count = context['_count'] ? parseInt(context['_count']) : 3;
+      const count = context['count'] ? parseInt(context['count']) : 3;
       const elements: OrchidValue[] = [];
       for (let i = 0; i < count; i++) {
         elements.push({
