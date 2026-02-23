@@ -206,9 +206,9 @@ val := d["name"]                      # dict key access
 ch := "hello"[0]                      # string character access
 ```
 
-### Bracket-Count Syntax
+### Count Parameter
 
-Some macros accept a count parameter: `Debate[3]("topic")`, `Brainstorm[10]("ideas")`. See specification.md §5.6.
+Some macros accept a `count=` named parameter: `Debate("topic", count=3)`, `Brainstorm("ideas", count=10)`. See specification.md §5.6.
 
 ### Tags (Behavior Modifiers)
 
