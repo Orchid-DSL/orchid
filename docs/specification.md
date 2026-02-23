@@ -442,35 +442,35 @@ Reasoning macros are named cognitive operations that shape *how the agent reason
 
 **Operating on generated media.** The same reasoning macros (Critique, Refine, CoT, ELI5, etc.) accept **OrchidAsset** as input. When the first argument is an asset (e.g. a generated image), the runtime passes it to the provider as an attachment; the provider can then run vision/multimodal (e.g. Claude analyzing the image). Example: `cover := Generate("dog", format="image")` then `critique := Critique(cover)` or `Refine(cover, "focus on composition")` — the macro operates on the media itself, not just the prompt. Providers that support vision (e.g. Claude with image blocks) will receive the asset; others may fall back to a text description.
 
-### 5.6 Bracket-Count Syntax
+### 5.6 Count Parameter
 
-Several macros accept an optional count parameter via bracket notation: `Operation[n](args)`. The integer `n` controls how many results, viewpoints, or iterations the macro produces.
+Several macros accept an optional `count=` named parameter controlling how many results, viewpoints, or iterations are produced.
 
 ```orchid
 # Debate with 3 viewpoints
-perspectives := Debate[3]("should we adopt microservices?")
+perspectives := Debate("should we adopt microservices?", count=3)
 
 # Brainstorm 10 ideas
-ideas := Brainstorm[10]("ways to reduce API latency")
+ideas := Brainstorm("ways to reduce API latency", count=10)
 
-# Debate with 2 sides (default if unspecified depends on runtime)
-pros_cons := Debate[2]("remote work vs office work")
+# Debate with 2 sides
+pros_cons := Debate("remote work vs office work", count=2)
 ```
 
-The bracket-count is syntactically distinct from tags. `Brainstorm[10]("topic")` sets the *quantity* of outputs, while `Brainstorm("topic")<deep>` sets the *quality* of reasoning. They compose naturally:
+The `count=` parameter composes naturally with tags:
 
 ```orchid
 # 10 ideas, each explored thoroughly
-ideas := Brainstorm[10]("reduce latency")<deep>
+ideas := Brainstorm("reduce latency", count=10)<deep>
 ```
 
-Macros that support bracket-count:
+Macros that support `count=`:
 
 | Macro        | Default `n` | Behavior                                         |
 |--------------|-------------|--------------------------------------------------|
-| `Debate[n]`  | 2           | Generate n distinct viewpoints, then synthesize.  |
-| `Brainstorm[n]` | 5        | Generate n distinct ideas or approaches.          |
-| `Refine[n]`  | 1           | Run n iterative refinement passes.                |
+| `Debate`     | 2           | Generate n distinct viewpoints, then synthesize.  |
+| `Brainstorm` | 5           | Generate n distinct ideas or approaches.          |
+| `Refine`     | 1           | Run n iterative refinement passes.                |
 
 ### 5.7 Custom Macro Definition
 
