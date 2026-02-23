@@ -405,6 +405,39 @@ describe('Parser', () => {
     });
   });
 
+  describe('index expressions', () => {
+    it('should parse list index access', () => {
+      const ast = parse('val := items[0]');
+      const assign = ast.body[0] as AST.Assignment;
+      expect(assign.value).toMatchObject({ type: 'IndexExpression' });
+      const idx = assign.value as AST.IndexExpression;
+      expect(idx.object).toMatchObject({ type: 'Identifier', name: 'items' });
+      expect(idx.index).toMatchObject({ type: 'NumberLiteral', value: 0 });
+    });
+
+    it('should parse nested index access', () => {
+      const ast = parse('val := matrix[0][1]');
+      const assign = ast.body[0] as AST.Assignment;
+      expect(assign.value).toMatchObject({ type: 'IndexExpression' });
+      const outer = assign.value as AST.IndexExpression;
+      expect(outer.object).toMatchObject({ type: 'IndexExpression' });
+    });
+
+    it('should parse string key index access', () => {
+      const ast = parse('val := d["key"]');
+      const assign = ast.body[0] as AST.Assignment;
+      const idx = assign.value as AST.IndexExpression;
+      expect(idx.index).toMatchObject({ type: 'StringLiteral', value: 'key' });
+    });
+
+    it('should not parse uppercase identifier[n] as index (bracket count)', () => {
+      const ast = parse('result := Brainstorm[5]("ideas")');
+      const assign = ast.body[0] as AST.Assignment;
+      // Should be an Operation with count, not an IndexExpression
+      expect(assign.value).toMatchObject({ type: 'Operation', name: 'Brainstorm' });
+    });
+  });
+
   describe('complete programs', () => {
     it('should parse hello_world example structure', () => {
       const source = `@orchid 0.1

@@ -43,6 +43,7 @@ export type Node =
   | SectionComment
   | PermissionsBlock
   | Tag
+  | IndexExpression
   | ListenExpression
   | StreamExpression
   | PlusAssignment;

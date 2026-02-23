@@ -131,6 +131,22 @@ sources := ["arxiv", "pubmed", "semantic_scholar"]
 weights := {relevance: 0.7, recency: 0.3}
 ```
 
+### 2.4 Index Access
+
+List, dict, and string values support subscript access with brackets. Negative indices count from the end. Out-of-range access returns `null`.
+
+```orchid
+results := [10, 20, 30]
+first := results[0]                     # 10
+last := results[-1]                     # 30
+
+config := {model: "claude", temp: 0.7}
+name := config["model"]                 # "claude"
+
+greeting := "hello"
+ch := greeting[0]                       # "h"
+```
+
 ---
 
 ## 3. Blocks and Scope
@@ -389,7 +405,7 @@ Reasoning macros are named cognitive operations that shape *how the agent reason
 | `Steelman`         | `Steelman(argument)`          | Construct the strongest version of an argument.         |
 | `DevilsAdvocate`   | `DevilsAdvocate(position)`    | Argue against a position regardless of agreement.       |
 | `Counterfactual`   | `Counterfactual(scenario)`    | What-if analysis. Explore alternate outcomes.           |
-| `Validate`         | `Validate(output, criteria)`  | Check output against explicit acceptance criteria.      |
+| `Validate`         | `Validate(output, criteria)`  | Check output against explicit acceptance criteria. Returns boolean. |
 
 ### 5.3 Synthesis Macros
 
@@ -426,7 +442,37 @@ Reasoning macros are named cognitive operations that shape *how the agent reason
 
 **Operating on generated media.** The same reasoning macros (Critique, Refine, CoT, ELI5, etc.) accept **OrchidAsset** as input. When the first argument is an asset (e.g. a generated image), the runtime passes it to the provider as an attachment; the provider can then run vision/multimodal (e.g. Claude analyzing the image). Example: `cover := Generate("dog", format="image")` then `critique := Critique(cover)` or `Refine(cover, "focus on composition")` — the macro operates on the media itself, not just the prompt. Providers that support vision (e.g. Claude with image blocks) will receive the asset; others may fall back to a text description.
 
-### 5.6 Custom Macro Definition
+### 5.6 Bracket-Count Syntax
+
+Several macros accept an optional count parameter via bracket notation: `Operation[n](args)`. The integer `n` controls how many results, viewpoints, or iterations the macro produces.
+
+```orchid
+# Debate with 3 viewpoints
+perspectives := Debate[3]("should we adopt microservices?")
+
+# Brainstorm 10 ideas
+ideas := Brainstorm[10]("ways to reduce API latency")
+
+# Debate with 2 sides (default if unspecified depends on runtime)
+pros_cons := Debate[2]("remote work vs office work")
+```
+
+The bracket-count is syntactically distinct from tags. `Brainstorm[10]("topic")` sets the *quantity* of outputs, while `Brainstorm("topic")<deep>` sets the *quality* of reasoning. They compose naturally:
+
+```orchid
+# 10 ideas, each explored thoroughly
+ideas := Brainstorm[10]("reduce latency")<deep>
+```
+
+Macros that support bracket-count:
+
+| Macro        | Default `n` | Behavior                                         |
+|--------------|-------------|--------------------------------------------------|
+| `Debate[n]`  | 2           | Generate n distinct viewpoints, then synthesize.  |
+| `Brainstorm[n]` | 5        | Generate n distinct ideas or approaches.          |
+| `Refine[n]`  | 1           | Run n iterative refinement passes.                |
+
+### 5.7 Custom Macro Definition
 
 Macros extend the standard library with reusable, parameterized cognitive patterns. Tags can be applied at **definition time** (defaults for every invocation) or at **call site** (per-invocation override).
 
@@ -472,6 +518,18 @@ Operation("args")<tag>
 Operation("args")<tag1, tag2>
 ```
 
+#### Dynamic Tag Resolution
+
+Tag names can be resolved dynamically from variables using the `$` prefix. If the variable is unset or null, the tag is silently skipped.
+
+```orchid
+mode := "deep"
+CoT("analysis")<$mode>                # equivalent to CoT("analysis")<deep>
+
+tags := "strict"
+Validate(output)<$tags, cite>         # mixes dynamic and static tags
+```
+
 ### 6.1 Execution Tags
 
 | Tag              | Description                                                              |
@@ -487,7 +545,8 @@ Operation("args")<tag1, tag2>
 
 | Tag              | Description                                                              |
 |------------------|--------------------------------------------------------------------------|
-| `<retry>`        | Retry on failure. `<retry=3>` for max attempts, `<retry=3, backoff>`.   |
+| `<retry>`        | Retry on failure. `<retry=3>` for max attempts.                         |
+| `<backoff>`      | Use with `<retry>`. Exponential delay between attempts (1s, 2s, 4s... capped at 30s). |
 | `<timeout=Ns>`   | Abort and return partial results after N seconds.                        |
 | `<pure>`         | No side effects. Safe to re-execute; runtime may cache and deduplicate.  |
 | `<cached>`       | Use cached results if available and fresh.                               |
@@ -606,12 +665,13 @@ Meta operations provide introspection and control over execution.
 |---------------------|----------------------------------|----------------------------------------------------------|
 | `Explain`           | `Explain(step)`                  | Justify reasoning for a specific step or decision.       |
 | `Confidence`        | `Confidence(scope?)`             | Self-assess certainty (0.0-1.0). Optional scope.        |
-| `Benchmark`         | `Benchmark(output, metric)`      | Evaluate output quality against named criteria.          |
+| `Benchmark`         | `Benchmark(output, metric)`      | Evaluate output quality against named criteria (returns 0.0-1.0). |
 | `Trace`             | `Trace(depth?)`                  | Emit execution history. Depth controls granularity.      |
 | `Checkpoint`        | `Checkpoint(label?)`             | Save current agent state for potential rollback.         |
 | `Rollback`          | `Rollback(target)`               | Revert to a checkpoint by label or step count.           |
 | `Reflect`           | `Reflect(process)`               | Meta-cognitive review of the agent's own approach.       |
-| `Elapsed`           | `Elapsed()`                      | Wall-clock time since execution began.                   |
+| `Elapsed`           | `Elapsed()`                      | Wall-clock time since execution began (returns ms).      |
+| `Save`              | `Save(content, path?)`           | Write content to file at path, or stdout if no path.     |
 
 ```orchid
 Checkpoint("pre_analysis")
@@ -1050,6 +1110,7 @@ When `<retry=N>` is exhausted:
 - If `<fallback=X>` is present, the operation returns X silently.
 - If `<best_effort>` is tagged, the operation returns the last attempted result with degraded confidence.
 - Otherwise, a `ValidationError` is raised.
+  - If the `until` condition involves `Confidence()`, a `LowConfidence` error is raised instead.
 
 ---
 
@@ -1088,7 +1149,7 @@ import macros/threat_model.orch as ThreatModel
 import agents/researcher.orch as Researcher
 ```
 
-**Import resolution:** Paths are relative to the importing file. Runtimes may also support a library path (e.g., `ORCHID_PATH` environment variable) for shared macro collections.
+**Import resolution:** Paths are relative to the importing file. If not found locally, the runtime searches each directory in the `ORCHID_PATH` environment variable (colon-separated on Unix, semicolon-separated on Windows) for shared macro collections.
 
 **What can be imported:** Only top-level `macro` and `agent` definitions are exported from a file. Variables, inline operations, and metadata are private to the defining file.
 
@@ -1325,15 +1386,16 @@ postfix_expr   ::= primary ('.' IDENTIFIER | '(' args? ')' | '[' expression ']')
 primary        ::= operation | IDENTIFIER | literal | '(' expression ')'
                  | listen_expr | stream_expr
 
-operation      ::= IDENTIFIER '(' args? ')' tags?
+operation      ::= IDENTIFIER count? '(' args? ')' tags?
                |   IDENTIFIER tags?
                |   namespace ':' IDENTIFIER '(' args? ')' tags?
+count          ::= '[' INTEGER ']'
 
 args           ::= arg (',' arg)*
 arg            ::= expression | IDENTIFIER '=' expression
 
 tags           ::= '<' tag (',' tag)* '>'
-tag            ::= IDENTIFIER ('=' value)?
+tag            ::= IDENTIFIER ('=' value)? | '$' IDENTIFIER
 
 atomic_block   ::= '###' NEWLINE statement* '###'
 
@@ -1434,8 +1496,13 @@ The following macros are available in all Orchid environments without import:
 **Critique:** Critique, RedTeam, Steelman, DevilsAdvocate, Counterfactual, Validate
 **Synthesis:** Refine, Consensus, Debate, Synthesize, Reconcile, Prioritize
 **Communication:** ELI5, Formal, Analogize, Socratic, Narrate, Translate
+<<<<<<< HEAD
 **Generative:** Creative, Brainstorm, Abstract, Ground, Reframe, Generate
 **Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Elapsed
+=======
+**Generative:** Creative, Brainstorm, Abstract, Ground, Reframe
+**Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Cost, Elapsed, Save
+>>>>>>> origin/main
 
 ## Appendix C: Comparison with Existing Approaches
 

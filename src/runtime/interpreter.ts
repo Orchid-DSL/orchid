@@ -21,6 +21,7 @@ import { BUILTIN_MACROS, META_OPERATIONS } from './builtins';
 import { MCPManager } from './mcp-manager';
 import { OrchidPlugin, PluginContext } from './plugin';
 import { StatusReporter, SilentStatusReporter } from './status';
+import { ConfidenceTracker } from './confidence';
 
 /** Sentinel thrown to implement return statements. */
 class ReturnSignal {
@@ -84,6 +85,15 @@ export class Interpreter {
   private status: StatusReporter;
   private operationCache: Map<string, OrchidValue> = new Map();
   private frozenVars: Set<string> = new Set();
+  /** Stack of active agent permission scopes. The top entry restricts tool access. */
+  private permissionsStack: AST.PermissionsBlock[] = [];
+  /** Accumulated context size (character count) for ContextOverflow detection. */
+  private contextSize = 0;
+  private readonly maxContextSize = 1_000_000; // 1M chars ≈ ~250K tokens
+  /** Runtime confidence signal tracker (spec §8.1). */
+  private confidenceTracker: ConfidenceTracker;
+  /** Count of dropped events due to buffer overflow (spec §10.5). */
+  private droppedEvents = 0;
 
   constructor(options: InterpreterOptions) {
     this.provider = options.provider;
@@ -92,6 +102,7 @@ export class Interpreter {
     this.traceEnabled = options.trace ?? false;
     this.scriptDir = options.scriptDir ?? process.cwd();
     this.status = options.status ?? new SilentStatusReporter();
+    this.confidenceTracker = new ConfidenceTracker();
   }
 
   async run(program: AST.Program): Promise<OrchidValue> {
@@ -346,9 +357,11 @@ export class Interpreter {
       for (let i = 0; i < targets.length; i++) {
         const v = i < value.elements.length ? value.elements[i] : orchidNull();
         env.set(targets[i].name, v);
+        this.confidenceTracker.recordAssignment(targets[i].name);
       }
     } else {
       env.set(node.target.name, value);
+      this.confidenceTracker.recordAssignment(node.target.name);
 
       // <frozen>: mark variable as immutable if the value came from a frozen operation
       if (this.nodeHasFrozenTag(node.value)) {
@@ -397,20 +410,40 @@ export class Interpreter {
       const input = await this.resolveArgs(node.args, env);
       const query = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
       return this.withTagBehaviors('Search', query, tags, async () => {
-        return this.withTimeout(
+        const result = await this.withTimeout(
           this.provider.search(query, tags),
           tags, node.position,
         );
+        // Track as a data source for confidence
+        this.confidenceTracker.recordSource();
+        // Throw DataUnavailable if the search returned nothing meaningful
+        if (result.kind === 'null' || (result.kind === 'string' && result.value.trim() === '')) {
+          throw new OrchidError('DataUnavailable', `Search returned no results for: "${query}"`, node.position);
+        }
+        return result;
       }, node.position);
     }
 
     if (name === 'Confidence') {
       const input = await this.resolveArgs(node.args, env);
-      const scope = input.length > 0 ? valueToString(input[0]) : undefined;
+      // Resolve scope: if the argument is a variable name, use it for per-variable tracking
+      let scope: string | undefined;
+      if (node.args.length > 0 && node.args[0].value.type === 'Identifier') {
+        scope = (node.args[0].value as AST.Identifier).name;
+      } else if (input.length > 0) {
+        scope = valueToString(input[0]);
+      }
       this.status.start('Assessing confidence...');
-      const conf = await this.provider.confidence(scope);
-      this.status.succeed(`Confidence: ${conf}`);
-      return orchidNumber(conf);
+      // Get the LLM's subjective assessment
+      const providerConf = await this.provider.confidence(scope);
+      // Blend with runtime signals (spec §8.1: hybrid confidence model)
+      const blended = this.confidenceTracker.blend(providerConf, scope);
+      if (this.traceEnabled) {
+        const signals = this.confidenceTracker.getSignals(scope);
+        this.trace(`Confidence(${scope ?? 'global'}): provider=${providerConf}, blended=${blended}, signals=${JSON.stringify(signals)}`);
+      }
+      this.status.succeed(`Confidence: ${blended}`);
+      return orchidNumber(blended);
     }
 
     if (name === 'Checkpoint') {
@@ -447,12 +480,53 @@ export class Interpreter {
       for (const entry of this.traceLog) {
         console.log(`  ${entry}`);
       }
-      return orchidString(this.traceLog.join('\n'));
+      if (this.droppedEvents > 0) {
+        console.log(`  [DroppedEvents: ${this.droppedEvents}]`);
+      }
+      const traceOutput = this.droppedEvents > 0
+        ? this.traceLog.join('\n') + `\n[DroppedEvents: ${this.droppedEvents}]`
+        : this.traceLog.join('\n');
+      return orchidString(traceOutput);
     }
 
     if (name === 'Elapsed') {
       const elapsed = Date.now() - this.startTime;
-      return orchidString(`${elapsed}ms`);
+      return orchidNumber(elapsed);
+    }
+
+    if (name === 'Validate') {
+      const input = await this.resolveArgs(node.args, env);
+      const namedArgs = await this.resolveNamedArgs(node.args, env);
+      const content = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
+      const criteria = namedArgs.has('criteria')
+        ? valueToString(namedArgs.get('criteria')!)
+        : (input.length > 1 ? valueToString(input[1]) : 'meets all requirements');
+      this.status.start(`Validate(${criteria.slice(0, 40)})...`);
+      const result = await this.provider.execute('Validate', content, { criteria }, tags);
+      this.status.succeed(`Validate done`);
+      // Parse the boolean result: look for pass/true/yes vs fail/false/no
+      const text = valueToString(result).toLowerCase();
+      const passes = /\b(pass|true|yes|valid|meets|satisfied|confirmed)\b/.test(text)
+        && !/\b(fail|false|no|invalid|not met|unsatisfied|does not)\b/.test(text);
+      return orchidBoolean(passes);
+    }
+
+    if (name === 'Benchmark') {
+      const input = await this.resolveArgs(node.args, env);
+      const namedArgs = await this.resolveNamedArgs(node.args, env);
+      const content = input.length > 0 ? valueToString(input[0]) : valueToString(this.implicitContext);
+      const metric = namedArgs.has('metric')
+        ? valueToString(namedArgs.get('metric')!)
+        : (input.length > 1 ? valueToString(input[1]) : 'overall quality');
+      this.status.start(`Benchmark(${metric})...`);
+      const result = await this.provider.execute('Benchmark', content, { metric }, tags);
+      this.status.succeed(`Benchmark done`);
+      // Parse the numeric score from the result
+      const text = valueToString(result);
+      const match = text.match(/([0-9]*\.?[0-9]+)/);
+      const score = match ? parseFloat(match[1]) : 0.5;
+      const clamped = Math.max(0.0, Math.min(1.0, score));
+      return orchidNumber(Math.round(clamped * 100) / 100);
     }
 
     if (name === 'Log') {
@@ -469,14 +543,22 @@ export class Interpreter {
     }
 
     if (name === 'Save') {
-      const input = await this.resolveArgs(node.args, env);
-      const value = input.length > 0 ? input[0] : this.implicitContext;
-      if (value.kind === 'asset') {
-        const loc = value.path || value.url || '(inline data)';
-        console.log(`[Save] asset ${value.mediaType} (${value.mimeType}): ${loc}`);
+      const namedArgs = await this.resolveNamedArgs(node.args, env);
+      // Only use positional (unnamed) args for content
+      const positionalArgs: OrchidValue[] = [];
+      for (const arg of node.args) {
+        if (!arg.name) positionalArgs.push(await this.evaluate(arg.value, env));
+      }
+      const content = positionalArgs.length > 0 ? valueToString(positionalArgs[0]) : valueToString(this.implicitContext);
+      const pathArg = namedArgs.get('path');
+      if (pathArg && pathArg.kind === 'string') {
+        const savePath = path.resolve(this.scriptDir, pathArg.value);
+        fs.mkdirSync(path.dirname(savePath), { recursive: true });
+        fs.writeFileSync(savePath, content, 'utf-8');
+        if (this.traceEnabled) this.trace(`Saved to: ${savePath}`);
       } else {
-        const content = valueToString(value);
-        console.log(`[Save]: ${content.slice(0, 100)}${content.length > 100 ? '...' : ''}`);
+        // No path given — write to stdout
+        process.stdout.write(content + '\n');
       }
       return orchidNull();
     }
@@ -549,10 +631,15 @@ export class Interpreter {
       const execContext = this.hasTag(tags, 'isolated') ? {} : context;
 
       return this.withTagBehaviors(name, inputStr, tags, async () => {
-        return this.withTimeout(
-          this.provider.execute(name, inputStr, execContext, tags, options),
+        const result = await this.withTimeout(
+          this.provider.execute(name, inputStr, execContext, tags),
           tags, node.position,
         );
+        // Track confidence signals for specific operations
+        if (name === 'CoVe') this.confidenceTracker.recordCoVeVerification();
+        if (name === 'Search') this.confidenceTracker.recordSource();
+        this.confidenceTracker.recordOperationStep();
+        return result;
       }, node.position);
     }
 
@@ -578,6 +665,18 @@ export class Interpreter {
 
   private async executeNamespacedOperation(node: AST.NamespacedOperation, env: Environment): Promise<OrchidValue> {
     const tags = await this.resolveTags(node.tags, env);
+
+    // Enforce agent permission constraints
+    this.checkPermission(node.namespace, node.name, node.position);
+
+    // Check for imported macros/agents stored with colon key (namespace:name)
+    const colonKey = `${node.namespace}:${node.name}`;
+    if (this.macros.has(colonKey)) {
+      return this.callMacro(this.macros.get(colonKey)!, node.args, tags, env);
+    }
+    if (this.agents.has(colonKey)) {
+      return this.callAgent(this.agents.get(colonKey)!, node.args, tags, env);
+    }
 
     // Route to loaded Plugin if the namespace matches
     const plugin = this.plugins.get(node.namespace);
@@ -812,7 +911,10 @@ export class Interpreter {
       if (bestEffort) {
         return result;
       }
-      throw new OrchidError('ValidationError', `Until loop exhausted after ${maxRetries} iterations`, node.position);
+      // If the condition involves Confidence, throw LowConfidence
+      const isConfidenceCondition = this.nodeReferencesConfidence(node.condition);
+      const errorType = isConfidenceCondition ? 'LowConfidence' : 'ValidationError';
+      throw new OrchidError(errorType, `Until loop exhausted after ${maxRetries} iterations`, node.position);
     }
 
     return result;
@@ -1021,6 +1123,9 @@ export class Interpreter {
         entries.set(r.name, r.value);
       }
       this.status.succeed(`fork: ${branchLabel} complete`);
+      // Track fork agreement for confidence
+      const branchValues = results.map(r => r.value);
+      this.confidenceTracker.recordForkAgreement(this.computeForkAgreement(branchValues));
       const result = orchidDict(entries);
       this.implicitContext = result;
       return result;
@@ -1034,6 +1139,8 @@ export class Interpreter {
       })
     );
     this.status.succeed(`fork: ${branchCount} branches complete`);
+    // Track fork agreement for confidence
+    this.confidenceTracker.recordForkAgreement(this.computeForkAgreement(results));
     const result = orchidList(results);
     this.implicitContext = result;
     return result;
@@ -1171,6 +1278,11 @@ export class Interpreter {
       }
     }
 
+    // Push agent's permissions scope if defined
+    if (def.permissions) {
+      this.permissionsStack.push(def.permissions);
+    }
+
     try {
       let result: OrchidValue = orchidNull();
       for (const stmt of def.body) {
@@ -1184,6 +1296,10 @@ export class Interpreter {
         return e.value;
       }
       throw e;
+    } finally {
+      if (def.permissions) {
+        this.permissionsStack.pop();
+      }
     }
   }
 
@@ -1236,7 +1352,11 @@ export class Interpreter {
       }
       const buf = this.eventBuffer.get(node.event)!;
       buf.push(payload);
-      if (buf.length > 1000) buf.shift(); // Spec: drop oldest on overflow
+      if (buf.length > 1000) {
+        buf.shift();
+        this.droppedEvents++;
+        if (this.traceEnabled) this.trace(`Event buffer overflow for "${node.event}" — dropped oldest (${this.droppedEvents} total dropped)`);
+      }
     }
 
     return orchidNull();
@@ -1575,13 +1695,21 @@ export class Interpreter {
     if (!importPath.endsWith('.orch')) {
       importPath += '.orch';
     }
-    const resolved = path.resolve(this.scriptDir, importPath);
+    const resolved = this.resolveImportPath(importPath);
 
     // Check cache — avoid re-executing the same module
-    if (this.importCache.has(resolved)) {
+    if (resolved && this.importCache.has(resolved)) {
       const cachedEnv = this.importCache.get(resolved)!;
       this.mergeImportedBindings(cachedEnv, node.alias, this.globalEnv);
       return orchidNull();
+    }
+
+    if (!resolved) {
+      throw new OrchidError(
+        'ImportError',
+        `Module not found: ${importPath} (from import "${node.path}")`,
+        node.position,
+      );
     }
 
     // Detect circular imports
@@ -1595,7 +1723,7 @@ export class Interpreter {
     }
     this.importStack.add(resolved);
 
-    // Read and parse the source
+    // Read and parse the source (file existence already verified by resolveImportPath)
     if (!fs.existsSync(resolved)) {
       this.importStack.delete(resolved);
       throw new OrchidError(
@@ -1657,12 +1785,16 @@ export class Interpreter {
 
     // Also import any macros/agents defined in the module
     for (const [name, macro] of moduleInterpreter.macros) {
-      const prefixed = node.alias ? `${node.alias}_${name}` : name;
-      this.macros.set(prefixed, macro);
+      // Store with colon syntax for namespace:Operation() resolution
+      const colonPrefixed = node.alias ? `${node.alias}:${name}` : name;
+      this.macros.set(colonPrefixed, macro);
+      // Also store without prefix for direct calls
+      if (!node.alias) this.macros.set(name, macro);
     }
     for (const [name, agent] of moduleInterpreter.agents) {
-      const prefixed = node.alias ? `${node.alias}_${name}` : name;
-      this.agents.set(prefixed, agent);
+      const colonPrefixed = node.alias ? `${node.alias}:${name}` : name;
+      this.agents.set(colonPrefixed, agent);
+      if (!node.alias) this.agents.set(name, agent);
     }
 
     return orchidNull();
@@ -1692,6 +1824,28 @@ export class Interpreter {
         targetEnv.set(name, value);
       }
     }
+  }
+
+  /**
+   * Resolve an import path by searching the script directory first,
+   * then each directory in the ORCHID_PATH environment variable.
+   */
+  private resolveImportPath(importPath: string): string | null {
+    // First try relative to scriptDir
+    const primary = path.resolve(this.scriptDir, importPath);
+    if (fs.existsSync(primary)) return primary;
+
+    // Then search ORCHID_PATH
+    const orchidPath = process.env.ORCHID_PATH;
+    if (orchidPath) {
+      for (const dir of orchidPath.split(path.delimiter)) {
+        if (!dir) continue;
+        const candidate = path.resolve(dir, importPath);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+
+    return null;
   }
 
   // ─── Expression Operators ──────────────────────────────
@@ -1968,6 +2122,16 @@ export class Interpreter {
   private async resolveTags(tags: AST.Tag[], env: Environment): Promise<TagInfo[]> {
     const resolved: TagInfo[] = [];
     for (const t of tags) {
+      // Dynamic tag resolution: <$var> resolves the variable's string value as the tag name
+      if (t.name.startsWith('$')) {
+        const varName = t.name.slice(1);
+        const val = env.get(varName);
+        const resolvedName = val.kind === 'string' ? val.value : valueToString(val);
+        if (resolvedName && resolvedName !== 'null') {
+          resolved.push({ name: resolvedName, value: t.value ? await this.evaluate(t.value, env) : undefined });
+        }
+        continue;
+      }
       const info: TagInfo = { name: t.name };
       if (t.value) {
         info.value = await this.evaluate(t.value, env);
@@ -1988,6 +2152,36 @@ export class Interpreter {
     this.traceLog.push(`[${Date.now() - this.startTime}ms] ${message}`);
     if (this.traceEnabled) {
       console.log(`  [trace] ${message}`);
+    }
+  }
+
+  // ─── Permission Enforcement ─────────────────────────────
+
+  /**
+   * Check whether a namespaced tool call is allowed under the active
+   * agent's permissions block. If no permissions scope is active, all
+   * calls are allowed.
+   */
+  private checkPermission(namespace: string, action: string, position?: AST.Position): void {
+    if (this.permissionsStack.length === 0) return;
+
+    const perms = this.permissionsStack[this.permissionsStack.length - 1];
+    const entry = perms.permissions.find(p => p.namespace === namespace);
+    if (!entry) {
+      throw new OrchidError(
+        'PermissionDenied',
+        `Agent does not have permission to access namespace "${namespace}". Allowed: [${perms.permissions.map(p => p.namespace).join(', ')}]`,
+        position,
+      );
+    }
+
+    // Check if the specific action is allowed (wildcard '*' permits all)
+    if (!entry.actions.includes('*') && !entry.actions.includes(action)) {
+      throw new OrchidError(
+        'PermissionDenied',
+        `Agent does not have permission to call "${namespace}:${action}". Allowed actions: [${entry.actions.join(', ')}]`,
+        position,
+      );
     }
   }
 
@@ -2047,6 +2241,63 @@ export class Interpreter {
         (error) => { clearTimeout(timer); reject(error); },
       );
     });
+  }
+
+  /**
+   * Compute an agreement ratio (0.0–1.0) for fork branch results.
+   *
+   * Compares each pair of results: strings are compared by normalized
+   * content similarity (shared words), numbers by equality, and other
+   * types by exact equality. The returned ratio is the average pairwise
+   * agreement across all branch pairs.
+   */
+  private computeForkAgreement(results: OrchidValue[]): number {
+    if (results.length < 2) return 1.0;
+
+    let pairCount = 0;
+    let agreementSum = 0;
+
+    for (let i = 0; i < results.length; i++) {
+      for (let j = i + 1; j < results.length; j++) {
+        pairCount++;
+        const a = results[i];
+        const b = results[j];
+
+        if (valuesEqual(a, b)) {
+          agreementSum += 1.0;
+        } else if (a.kind === 'string' && b.kind === 'string') {
+          // Fuzzy string agreement: Jaccard similarity of word sets
+          const wordsA = new Set(a.value.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+          const wordsB = new Set(b.value.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+          if (wordsA.size === 0 && wordsB.size === 0) {
+            agreementSum += 1.0;
+          } else {
+            let intersection = 0;
+            for (const w of wordsA) { if (wordsB.has(w)) intersection++; }
+            const union = wordsA.size + wordsB.size - intersection;
+            agreementSum += union > 0 ? intersection / union : 0;
+          }
+        }
+        // Non-string, non-equal: 0 agreement (already initialized)
+      }
+    }
+
+    return pairCount > 0 ? agreementSum / pairCount : 1.0;
+  }
+
+  /**
+   * Check if an AST node (typically an until condition) references Confidence().
+   * Used to distinguish LowConfidence errors from generic ValidationErrors.
+   */
+  private nodeReferencesConfidence(node: AST.Node): boolean {
+    if (node.type === 'Operation' && node.name === 'Confidence') return true;
+    if (node.type === 'ComparisonExpression') {
+      return this.nodeReferencesConfidence(node.left) || this.nodeReferencesConfidence(node.right);
+    }
+    if (node.type === 'LogicalExpression') {
+      return this.nodeReferencesConfidence(node.left) || this.nodeReferencesConfidence(node.right);
+    }
+    return false;
   }
 
   // ─── Tag Behaviors ─────────────────────────────────────
@@ -2138,15 +2389,33 @@ export class Interpreter {
           } else {
             this.implicitContext = result;
           }
+          // Track accumulated context size for ContextOverflow detection
+          this.contextSize += valueToString(result).length;
+          if (this.contextSize > this.maxContextSize) {
+            throw new OrchidError(
+              'ContextOverflow',
+              `Accumulated context size (${this.contextSize} chars) exceeds limit (${this.maxContextSize})`,
+              position,
+            );
+          }
         }
 
         return result;
       } catch (e) {
         lastError = e;
+        // Track retry and error signals for confidence
+        this.confidenceTracker.recordError();
         if (!suppressStatus) {
           this.status.fail(`${operationName} failed`);
         }
         if (attempt < maxAttempts - 1) {
+          this.confidenceTracker.recordRetry();
+          // <backoff>: exponential backoff between retries (1s, 2s, 4s, ...)
+          if (useBackoff) {
+            const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+            if (this.traceEnabled) this.trace(`Backoff ${delayMs}ms before retry ${attempt + 2}/${maxAttempts} for ${operationName}`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
           if (this.traceEnabled) this.trace(`Retry ${attempt + 1}/${maxAttempts} for ${operationName}`);
           if (useBackoff) {
             // Exponential backoff: 100ms, 200ms, 400ms, 800ms, ...
