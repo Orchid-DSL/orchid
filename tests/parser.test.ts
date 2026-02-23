@@ -430,11 +430,16 @@ describe('Parser', () => {
       expect(idx.index).toMatchObject({ type: 'StringLiteral', value: 'key' });
     });
 
-    it('should not parse uppercase identifier[n] as index (bracket count)', () => {
-      const ast = parse('result := Brainstorm[5]("ideas")');
+    it('should parse Brainstorm with count parameter', () => {
+      const ast = parse('result := Brainstorm("ideas", count=5)');
       const assign = ast.body[0] as AST.Assignment;
-      // Should be an Operation with count, not an IndexExpression
-      expect(assign.value).toMatchObject({ type: 'Operation', name: 'Brainstorm' });
+      // Should be an Operation with count as named parameter
+      const op = assign.value as AST.Operation;
+      expect(op.type).toBe('Operation');
+      expect(op.name).toBe('Brainstorm');
+      const countArg = op.args.find(a => a.name === 'count');
+      expect(countArg).toBeDefined();
+      expect((countArg!.value as AST.NumberLiteral).value).toBe(5);
     });
   });
 
