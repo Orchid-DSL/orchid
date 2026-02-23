@@ -1438,21 +1438,7 @@ result := CoT("topic")<quick, $style>`;
     });
   });
 
-  // ─── Cost() wiring ─────────────────────────────────────────
-
-  describe('Cost() wiring', () => {
-    it('should return 0 for console provider', async () => {
-      const result = await run('cost := Cost()');
-      expect(result.kind).toBe('number');
-      if (result.kind === 'number') expect(result.value).toBe(0);
-    });
-
-    it('should return a number', async () => {
-      const result = await run(`Search("test")
-cost := Cost()`);
-      expect(result.kind).toBe('number');
-    });
-  });
+  // Cost() was removed as a builtin — no tests needed
 
   // ─── Save() persistence ─────────────────────────────────────
 
@@ -1851,10 +1837,9 @@ c := s[0]`);
       if (result.kind === 'string') expect(result.value).toBe('h');
     });
 
-    it('should return null for out of range index', async () => {
-      const result = await run(`items := [1, 2, 3]
-val := items[10]`);
-      expect(result.kind).toBe('null');
+    it('should throw for out of range index', async () => {
+      await expect(run(`items := [1, 2, 3]
+val := items[10]`)).rejects.toThrow('out of range');
     });
   });
 
