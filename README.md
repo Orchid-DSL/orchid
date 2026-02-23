@@ -72,7 +72,7 @@ CoT("analyze market trends")          # chain-of-thought deliberation
 CoVe(claims)                          # chain-of-verification fact-checking
 RedTeam(plan)                         # adversarial analysis
 ELI5(report)                          # simplify for general audience
-Debate[3]("should we expand to EU?")  # 3-perspective argumentation
+Debate("should we expand to EU?", count=3)  # 3-perspective argumentation
 ```
 
 ### Confidence-Aware Control Flow

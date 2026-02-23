@@ -112,12 +112,19 @@ describe('Parser', () => {
       expect(op.name).toBe('CoVe');
     });
 
-    it('should parse bracket notation like Brainstorm[10]', () => {
-      const ast = parse('Brainstorm[10]("ideas")');
+    it('should parse count as named parameter', () => {
+      const ast = parse('Brainstorm("ideas", count=10)');
       const op = ast.body[0] as AST.Operation;
       expect(op.name).toBe('Brainstorm');
-      const countArg = op.args.find(a => a.name === '_count');
+      const countArg = op.args.find(a => a.name === 'count');
       expect(countArg).toBeDefined();
+      expect((countArg!.value as AST.NumberLiteral).value).toBe(10);
+    });
+
+    it('should treat brackets after identifier as index access not count', () => {
+      const ast = parse('items[0]');
+      const idx = ast.body[0] as AST.IndexExpression;
+      expect(idx.type).toBe('IndexExpression');
     });
   });
 
@@ -264,6 +271,32 @@ describe('Parser', () => {
       expect(expr.property).toBe('market');
     });
 
+    it('should parse index expression', () => {
+      const ast = parse('x := items[0]');
+      const assign = ast.body[0] as AST.Assignment;
+      const idx = assign.value as AST.IndexExpression;
+      expect(idx.type).toBe('IndexExpression');
+      expect((idx.object as AST.Identifier).name).toBe('items');
+      expect((idx.index as AST.NumberLiteral).value).toBe(0);
+    });
+
+    it('should parse index with string key', () => {
+      const ast = parse('x := data["key"]');
+      const assign = ast.body[0] as AST.Assignment;
+      const idx = assign.value as AST.IndexExpression;
+      expect(idx.type).toBe('IndexExpression');
+      expect((idx.index as AST.StringLiteral).value).toBe('key');
+    });
+
+    it('should parse chained index access', () => {
+      const ast = parse('x := matrix[0][1]');
+      const assign = ast.body[0] as AST.Assignment;
+      const outer = assign.value as AST.IndexExpression;
+      expect(outer.type).toBe('IndexExpression');
+      const inner = outer.object as AST.IndexExpression;
+      expect(inner.type).toBe('IndexExpression');
+    });
+
     it('should parse list literal', () => {
       const ast = parse('items := ["a", "b", "c"]');
       const assign = ast.body[0] as AST.Assignment;
@@ -397,11 +430,16 @@ describe('Parser', () => {
       expect(idx.index).toMatchObject({ type: 'StringLiteral', value: 'key' });
     });
 
-    it('should not parse uppercase identifier[n] as index (bracket count)', () => {
-      const ast = parse('result := Brainstorm[5]("ideas")');
+    it('should parse Brainstorm with count parameter', () => {
+      const ast = parse('result := Brainstorm("ideas", count=5)');
       const assign = ast.body[0] as AST.Assignment;
-      // Should be an Operation with count, not an IndexExpression
-      expect(assign.value).toMatchObject({ type: 'Operation', name: 'Brainstorm' });
+      // Should be an Operation with count as named parameter
+      const op = assign.value as AST.Operation;
+      expect(op.type).toBe('Operation');
+      expect(op.name).toBe('Brainstorm');
+      const countArg = op.args.find(a => a.name === 'count');
+      expect(countArg).toBeDefined();
+      expect((countArg!.value as AST.NumberLiteral).value).toBe(5);
     });
   });
 

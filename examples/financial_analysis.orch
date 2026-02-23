@@ -33,7 +33,7 @@ elif confidence > 0.5:
     caveats := CoT("what are the key uncertainties in this analysis: $refined")
     thesis := thesis + caveats
 else:
-    thesis := Debate[3]("bull case vs bear case vs neutral for NVIDIA")
+    thesis := Debate("bull case vs bear case vs neutral for NVIDIA", count=3)
     thesis += CoT("what additional data would resolve the uncertainty")
 
 # Save the report

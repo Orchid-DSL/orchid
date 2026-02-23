@@ -1,0 +1,31 @@
+@orchid 0.1
+@name "Generate + iterate (multimedia demo)"
+
+## 1. Generate initial text
+draft := Generate("a one-line tagline for a note-taking app")
+
+## 2. Iterate on it with reasoning macros
+critique := Critique(draft)
+refined  := Refine(draft)
+stronger := Steelman(refined)
+
+## 3. Synthesize a final tagline from the iterations
+final_blurb := CoT("Given the draft, critique, refined version, and steelman, output one final punchy tagline: $draft | $refined | $stronger")
+
+## 4. Turn the final concept into an image prompt (reasoning over generated content)
+image_prompt := CoT("Convert this tagline into a single vivid scene for an image, in one short sentence: $final_blurb")
+
+## 5. Generate the image from the iterated concept
+cover := Generate(image_prompt, format="image")
+
+## 6. Operate on the media itself — same macros, input is the image (provider gets attachments)
+critique_of_image := Critique(cover)
+refinement_notes  := Refine(cover, "suggest concrete visual improvements")
+mood_analysis     := CoT(cover, "What mood does this image convey? One sentence.")
+
+## 7. Use the critique/refinement of the image for a second pass (optional)
+improvement := CoT("Image critique: ${critique_of_image}. Refinement notes: ${refinement_notes}. Propose one improved image prompt for a v2.")
+# cover_v2 := Generate(improvement, format="image")
+
+Save(cover)
+final_blurb

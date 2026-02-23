@@ -1,0 +1,86 @@
+@orchid 0.1
+@name "Multi-Agent Research Pipeline"
+@description "Demonstrates agent declarations, emit/on events, listen(), and a Gatherer → Analyst → Writer pipeline."
+
+# ── Agent Definitions ───────────────────────────────────
+
+agent Gatherer(topic):
+    """Collects raw information on a topic from multiple angles."""
+    permissions:
+        web: [search]
+
+    raw := fork:
+        general: Search("$topic overview")
+        recent: Search("$topic latest developments 2024")
+        technical: Search("$topic technical details")
+
+    vetted := CoVe(raw)
+    facts := Extract(vetted, schema="key_facts")
+
+    # Signal downstream agents that data is ready
+    emit DataReady(facts)
+    return facts
+
+agent Analyst(data):
+    """Performs multi-perspective analysis and critique."""
+    perspectives := fork:
+        optimistic: Steelman(data)
+        critical: RedTeam(data)
+        neutral: CoT("provide a balanced assessment of:\n$data")
+
+    synthesis := Synthesize(perspectives)
+    refined := Refine(synthesis)
+
+    emit AnalysisDone(refined)
+    return refined
+
+agent Writer(analysis, tone="formal"):
+    """Produces polished output in the requested tone."""
+    if tone == "formal":
+        draft := Formal(analysis)
+    elif tone == "simple":
+        draft := ELI5(analysis)
+    else:
+        draft := CoT("write about this in a $tone style:\n$analysis")
+
+    # Confidence-gated refinement
+    confidence := Confidence(draft)
+    if confidence < 0.7:
+        draft := Refine(draft)
+
+    return draft
+
+# ── Event Handlers ──────────────────────────────────────
+# These run whenever the named event fires, demonstrating
+# the on/emit communication pattern between agents.
+
+on DataReady as event:
+    Log("Gatherer finished — data ready for analysis")
+
+on AnalysisDone as event:
+    Log("Analyst finished — analysis ready for writing")
+
+# ── Pipeline Execution ──────────────────────────────────
+
+topic := "the impact of large language models on software engineering"
+
+# Stage 1: Gather
+raw_data := Gatherer(topic)
+
+# Stage 2: Analyze
+insights := Analyst(raw_data)
+
+# Stage 3: Write (parallel outputs in two tones)
+outputs := fork:
+    technical: Writer(insights, tone="formal")
+    accessible: Writer(insights, tone="simple")
+
+# ── Final Output ────────────────────────────────────────
+tech := outputs.technical
+simple := outputs.accessible
+Log("Technical version:")
+Log(tech)
+Log("Accessible version:")
+Log(simple)
+
+outputs

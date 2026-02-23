@@ -34,6 +34,7 @@ export type Node =
   | Identifier
   | ImplicitContext
   | MemberExpression
+  | IndexExpression
   | ComparisonExpression
   | LogicalExpression
   | UnaryExpression

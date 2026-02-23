@@ -14,10 +14,10 @@ export const BUILTIN_MACROS = new Set([
   // Communication
   'ELI5', 'Formal', 'Analogize', 'Socratic', 'Narrate', 'Translate',
   // Generative
-  'Creative', 'Brainstorm', 'Abstract', 'Ground', 'Reframe',
+  'Creative', 'Brainstorm', 'Abstract', 'Ground', 'Reframe', 'Generate',
   // Meta
   'Explain', 'Confidence', 'Benchmark', 'Trace', 'Checkpoint', 'Rollback',
-  'Reflect', 'Cost', 'Elapsed',
+  'Reflect', 'Elapsed',
   // Utility
   'Search', 'Summarize',
   // Built-in functions
@@ -29,7 +29,7 @@ export const BUILTIN_MACROS = new Set([
  */
 export const META_OPERATIONS = new Set([
   'Confidence', 'Benchmark', 'Trace', 'Checkpoint', 'Rollback',
-  'Cost', 'Elapsed', 'Explain', 'Reflect',
+  'Elapsed', 'Explain', 'Reflect',
 ]);
 
 /**
@@ -69,6 +69,7 @@ export function describeBuiltin(name: string): string {
     Abstract: 'Extract general principles from specific instances.',
     Ground: 'Connect abstract concepts to concrete examples.',
     Reframe: 'Approach from a fundamentally different angle.',
+    Generate: 'Generate multimedia (image, audio, video, document) or text from a prompt. Keyword: format="image"|"audio"|"video"|"document"|"text" (default).',
     Explain: 'Justify reasoning for a specific step or decision.',
     Confidence: 'Self-assess certainty (0.0-1.0).',
     Benchmark: 'Evaluate output quality against named criteria.',
@@ -76,7 +77,6 @@ export function describeBuiltin(name: string): string {
     Checkpoint: 'Save current agent state for potential rollback.',
     Rollback: 'Revert to a checkpoint.',
     Reflect: "Meta-cognitive review of the agent's own approach.",
-    Cost: 'Report estimated token/compute cost so far.',
     Elapsed: 'Wall-clock time since execution began.',
     Search: 'Search for information on a topic.',
     Summarize: 'Compress context into a summary.',

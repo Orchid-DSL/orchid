@@ -303,7 +303,7 @@ export class Interpreter {
       case 'MemberExpression':
         return this.executeMemberExpr(node, env);
       case 'IndexExpression':
-        return this.executeIndexExpr(node as AST.IndexExpression, env);
+        return this.executeIndexExpr(node, env);
 
       // Literals
       case 'StringLiteral':
@@ -489,11 +489,6 @@ export class Interpreter {
       return orchidString(traceOutput);
     }
 
-    if (name === 'Cost') {
-      const tokens = this.provider.getTokensUsed?.() ?? 0;
-      return orchidNumber(tokens);
-    }
-
     if (name === 'Elapsed') {
       const elapsed = Date.now() - this.startTime;
       return orchidNumber(elapsed);
@@ -583,26 +578,53 @@ export class Interpreter {
       return this.executeDiscover(pattern);
     }
 
+    if (name === 'Generate') {
+      const formatArg = node.args.find(a => a.name === 'format');
+      const promptArg = node.args.find(a => a.name !== 'format');
+      const prompt = promptArg
+        ? valueToString(await this.evaluate(promptArg.value, env))
+        : valueToString(this.implicitContext);
+      const formatStr = formatArg
+        ? valueToString(await this.evaluate(formatArg.value, env)).toLowerCase()
+        : 'text';
+      const validFormats = ['text', 'image', 'audio', 'video', 'document'];
+      const format = validFormats.includes(formatStr) ? formatStr as import('./values').GenerateFormat : 'text';
+      this.status.start(`Generate (${format})...`);
+      const result = await this.withTagBehaviors('Generate', prompt, tags, async () => {
+        return this.withTimeout(
+          this.provider.generate(prompt, format, tags),
+          tags, node.position,
+        );
+      }, node.position);
+      this.status.succeed(`Generate (${format}) done`);
+      this.implicitContext = result;
+      return result;
+    }
+
     // Generic built-in reasoning macros — delegate to provider
     if (BUILTIN_MACROS.has(name)) {
       const input = await this.resolveArgs(node.args, env);
-      const inputStr = input.length > 0
-        ? valueToString(input[0])
-        : valueToString(this.implicitContext);
+      const primary = input.length > 0 ? input[0] : this.implicitContext;
 
-      // Build context from keyword args
-      const context: Record<string, string> = {};
-      for (const arg of node.args) {
-        if (arg.name && arg.name !== '_count') {
-          context[arg.name] = valueToString(await this.evaluate(arg.value, env));
-        }
+      // When primary input is media (OrchidAsset), pass as attachments so the provider
+      // can run vision/multimodal (e.g. Critique(image) critiques the image itself).
+      let inputStr: string;
+      let options: { attachments?: import('./values').OrchidAsset[] } | undefined;
+      if (primary.kind === 'asset') {
+        options = { attachments: [primary] };
+        inputStr = input.length > 1
+          ? valueToString(input[1])
+          : `Analyze the attached ${primary.mediaType}.`;
+      } else {
+        inputStr = valueToString(primary);
       }
 
-      // Handle _count for Brainstorm[n], Debate[n], etc.
-      const countArg = node.args.find(a => a.name === '_count');
-      if (countArg) {
-        const countVal = await this.evaluate(countArg.value, env);
-        context['_count'] = valueToString(countVal);
+      // Build context from keyword args (count= becomes context['count'] for providers)
+      const context: Record<string, string> = {};
+      for (const arg of node.args) {
+        if (arg.name) {
+          context[arg.name] = valueToString(await this.evaluate(arg.value, env));
+        }
       }
 
       // <isolated>: pass empty context to provider
@@ -623,13 +645,19 @@ export class Interpreter {
 
     // Unknown operation — try calling as a generic operation
     const input = await this.resolveArgs(node.args, env);
-    const inputStr = input.length > 0
-      ? valueToString(input[0])
-      : valueToString(this.implicitContext);
+    const primary = input.length > 0 ? input[0] : this.implicitContext;
+    let inputStr: string;
+    let options: { attachments?: import('./values').OrchidAsset[] } | undefined;
+    if (primary.kind === 'asset') {
+      options = { attachments: [primary] };
+      inputStr = input.length > 1 ? valueToString(input[1]) : `Analyze the attached ${primary.mediaType}.`;
+    } else {
+      inputStr = valueToString(primary);
+    }
 
     return this.withTagBehaviors(name, inputStr, tags, async () => {
       return this.withTimeout(
-        this.provider.execute(name, inputStr, {}, tags),
+        this.provider.execute(name, inputStr, {}, tags, options),
         tags, node.position,
       );
     }, node.position);
@@ -1067,6 +1095,15 @@ export class Interpreter {
     // Named or unnamed branches
     const isNamed = node.branches.some(b => b.name);
     const branchCount = node.branches.length;
+
+    // Validate fork[n] count if specified
+    if (node.count !== undefined && node.count !== branchCount) {
+      console.warn(
+        `[warn] fork[${node.count}] declares ${node.count} branches but ${branchCount} found` +
+        (node.position ? ` (line ${node.position.line})` : ''),
+      );
+    }
+
     const branchLabel = isNamed
       ? node.branches.map(b => b.name).join(', ')
       : `${branchCount} branches`;
@@ -1982,30 +2019,41 @@ export class Interpreter {
     const obj = await this.evaluate(node.object, env);
     const idx = await this.evaluate(node.index, env);
 
-    if (obj.kind === 'list' && idx.kind === 'number') {
-      const i = Math.floor(idx.value);
-      // Support negative indexing: list[-1] = last element
-      const normalizedIdx = i < 0 ? obj.elements.length + i : i;
-      if (normalizedIdx >= 0 && normalizedIdx < obj.elements.length) {
-        return obj.elements[normalizedIdx];
+    if (obj.kind === 'list') {
+      if (idx.kind !== 'number') {
+        throw new OrchidError('TypeError', `List index must be a number, got ${idx.kind}`, node.position);
       }
-      return orchidNull();
+      const i = Math.trunc(idx.value);
+      const len = obj.elements.length;
+      // Support negative indexing: list[-1] is the last element
+      const resolved = i < 0 ? len + i : i;
+      if (resolved < 0 || resolved >= len) {
+        throw new OrchidError('RuntimeError', `List index ${i} out of range (length ${len})`, node.position);
+      }
+      return obj.elements[resolved];
     }
 
-    if (obj.kind === 'dict' && idx.kind === 'string') {
+    if (obj.kind === 'string') {
+      if (idx.kind !== 'number') {
+        throw new OrchidError('TypeError', `String index must be a number, got ${idx.kind}`, node.position);
+      }
+      const i = Math.trunc(idx.value);
+      const len = obj.value.length;
+      const resolved = i < 0 ? len + i : i;
+      if (resolved < 0 || resolved >= len) {
+        throw new OrchidError('RuntimeError', `String index ${i} out of range (length ${len})`, node.position);
+      }
+      return orchidString(obj.value[resolved]);
+    }
+
+    if (obj.kind === 'dict') {
+      if (idx.kind !== 'string') {
+        throw new OrchidError('TypeError', `Dict key must be a string, got ${idx.kind}`, node.position);
+      }
       return obj.entries.get(idx.value) || orchidNull();
     }
 
-    if (obj.kind === 'string' && idx.kind === 'number') {
-      const i = Math.floor(idx.value);
-      const normalizedIdx = i < 0 ? obj.value.length + i : i;
-      if (normalizedIdx >= 0 && normalizedIdx < obj.value.length) {
-        return orchidString(obj.value[normalizedIdx]);
-      }
-      return orchidNull();
-    }
-
-    return orchidNull();
+    throw new OrchidError('TypeError', `Cannot index into ${obj.kind}`, node.position);
   }
 
   // ─── Literals ──────────────────────────────────────────
@@ -2052,9 +2100,7 @@ export class Interpreter {
   private async resolveArgs(args: AST.Argument[], env: Environment): Promise<OrchidValue[]> {
     const results: OrchidValue[] = [];
     for (const arg of args) {
-      if (!arg.name || arg.name === '_count') {
-        // Skip named args for positional resolution, but include _count
-        if (arg.name === '_count') continue;
+      if (!arg.name) {
         results.push(await this.evaluate(arg.value, env));
       } else {
         results.push(await this.evaluate(arg.value, env));
@@ -2066,7 +2112,7 @@ export class Interpreter {
   private async resolveNamedArgs(args: AST.Argument[], env: Environment): Promise<Map<string, OrchidValue>> {
     const named = new Map<string, OrchidValue>();
     for (const arg of args) {
-      if (arg.name && arg.name !== '_count') {
+      if (arg.name) {
         named.set(arg.name, await this.evaluate(arg.value, env));
       }
     }
@@ -2311,7 +2357,7 @@ export class Interpreter {
       }
     }
 
-    // <retry=N>: determine retry count
+    // <retry=N>: determine retry count; <backoff>: exponential backoff between retries
     const retryVal = this.getTagValue(tags, 'retry');
     const maxAttempts = retryVal && retryVal.kind === 'number' ? retryVal.value : 1;
     const useBackoff = this.hasTag(tags, 'backoff');
@@ -2371,6 +2417,11 @@ export class Interpreter {
             await new Promise(resolve => setTimeout(resolve, delayMs));
           }
           if (this.traceEnabled) this.trace(`Retry ${attempt + 1}/${maxAttempts} for ${operationName}`);
+          if (useBackoff) {
+            // Exponential backoff: 100ms, 200ms, 400ms, 800ms, ...
+            const delay = 100 * Math.pow(2, attempt);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         }
       }
     }

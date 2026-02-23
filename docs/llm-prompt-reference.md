@@ -114,7 +114,7 @@ All macros take an optional string/context argument. Called without arguments, t
 **Synthesis** (combine perspectives):
 - `Refine(draft, n?)` - Iterative improvement. Optional pass count.
 - `Consensus(perspectives)` - Find common ground.
-- `Debate[n](proposition)` - n-viewpoint argumentation.
+- `Debate(proposition, count=n)` - n-viewpoint argumentation.
 - `Synthesize(sources)` - Combine into unified output.
 - `Reconcile(conflicts)` - Resolve contradictions.
 - `Prioritize(items, criteria)` - Rank by importance.
@@ -129,7 +129,7 @@ All macros take an optional string/context argument. Called without arguments, t
 
 **Generative** (create):
 - `Creative(prompt)` - Divergent thinking.
-- `Brainstorm[n](topic)` - Generate n distinct ideas.
+- `Brainstorm(topic, count=n)` - Generate n distinct ideas.
 - `Abstract(specifics)` - Extract general principles.
 - `Ground(abstraction)` - Connect to concrete examples.
 - `Reframe(problem)` - Approach from a different angle.
@@ -245,7 +245,7 @@ if Confidence() > 0.8:
 elif Confidence() > 0.5:
     ELI5(refined) + Explain("uncertainty areas")
 else:
-    Debate[3]("bull vs bear vs neutral case")
+    Debate("bull vs bear vs neutral case", count=3)
 ```
 
 ### Custom Macro

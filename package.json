@@ -18,7 +18,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm test"
   },

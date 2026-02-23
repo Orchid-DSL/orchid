@@ -265,7 +265,7 @@ else:
 | `:=`     | Assign      | Assign operation output to a name                    | `x := Search("topic")`             |
 | `+=`     | Append      | Merge a value into an existing variable              | `report += Creative("new angle")`   |
 | `+`      | Add / Merge | Numeric addition; semantic synthesis for strings (LLM); concatenation for lists; merge for dicts | `full := research + analysis` |
-| `\|`     | Alternative | Try left; on failure or low confidence, try right    | `result := Search(a) \| Search(b)` |
+| `\|`     | Alternative | Try left; on failure, try right                      | `result := Search(a) \| Search(b)` |
 | `>>`     | Pipe        | Pass left output as right input                      | `Search("topic") >> CoT >> ELI5`   |
 
 #### Arithmetic Operators
@@ -322,7 +322,7 @@ total := subtotal + tax         # Arithmetic addition
 
 ### 4.2 Alternative Semantics
 
-The `|` operator provides fallback chains. Each alternative is tried left-to-right until one succeeds or meets the confidence threshold.
+The `|` operator provides fallback chains. Each alternative is tried left-to-right until one succeeds.
 
 ```orchid
 data := API:Fetch(url) | Cache:Load(key) | Search("$query")<best_effort>
@@ -413,7 +413,7 @@ Reasoning macros are named cognitive operations that shape *how the agent reason
 |--------------------|-------------------------------|---------------------------------------------------------|
 | `Refine`           | `Refine(draft, n?)`           | Iterative improvement. Optional pass count.             |
 | `Consensus`        | `Consensus(perspectives)`     | Find common ground across multiple perspectives.        |
-| `Debate`           | `Debate[n](proposition)`      | n-viewpoint argumentation. Generate and resolve.        |
+| `Debate`           | `Debate(proposition, count=n)` | n-viewpoint argumentation. Generate and resolve.        |
 | `Synthesize`       | `Synthesize(sources)`         | Combine disparate information into unified output.      |
 | `Reconcile`        | `Reconcile(conflicts)`        | Resolve contradictions between sources or analyses.     |
 | `Prioritize`       | `Prioritize(items, criteria)` | Rank items by importance given criteria.                |
@@ -434,10 +434,13 @@ Reasoning macros are named cognitive operations that shape *how the agent reason
 | Macro              | Signature                     | Description                                             |
 |--------------------|-------------------------------|---------------------------------------------------------|
 | `Creative`         | `Creative(prompt)`            | Divergent thinking. Novel ideas without constraints.    |
-| `Brainstorm`       | `Brainstorm[n](topic)`        | Generate n distinct ideas. Quantity over quality.       |
+| `Brainstorm`       | `Brainstorm(topic, count=n)`   | Generate n distinct ideas. Quantity over quality.       |
 | `Abstract`         | `Abstract(specifics)`         | Extract general principles from specific instances.     |
 | `Ground`           | `Ground(abstraction)`         | Connect abstract concepts to concrete examples.         |
 | `Reframe`          | `Reframe(problem)`            | Approach from a fundamentally different angle.          |
+| `Generate`         | `Generate(prompt, format=…)`   | Generate multimedia or text. `format` is a keyword argument: `image`, `audio`, `video`, `document`, or `text` (default). Returns an **OrchidAsset** (path/url/data + mimeType) for non-text; text returns a string. Image/audio/video/document typically require an MCP server or plugin; the Claude provider supports only `text`. |
+
+**Operating on generated media.** The same reasoning macros (Critique, Refine, CoT, ELI5, etc.) accept **OrchidAsset** as input. When the first argument is an asset (e.g. a generated image), the runtime passes it to the provider as an attachment; the provider can then run vision/multimodal (e.g. Claude analyzing the image). Example: `cover := Generate("dog", format="image")` then `critique := Critique(cover)` or `Refine(cover, "focus on composition")` — the macro operates on the media itself, not just the prompt. Providers that support vision (e.g. Claude with image blocks) will receive the asset; others may fall back to a text description.
 
 ### 5.6 Bracket-Count Syntax
 
@@ -496,7 +499,7 @@ result := ThreatModel(spec)<quick, private> # quick pass, suppress from logs
 ```orchid
 # Private scratch work macro: never logged by default
 macro Spitball(problem)<private, tentative>:
-    ideas := Brainstorm[10](problem)
+    ideas := Brainstorm(problem, count=10)
     filtered := Prioritize(ideas, criteria="novelty * feasibility")
     return Extract(filtered, schema="top 3 ideas")
 
@@ -579,7 +582,7 @@ if Confidence() > 0.8:
 elif Confidence() > 0.5:
     ELI5(analysis) + Explain("uncertainty areas")
 else:
-    Debate[2]("competing interpretations")
+    Debate("competing interpretations", count=2)
 ```
 
 ### 7.2 Loops
@@ -667,7 +670,6 @@ Meta operations provide introspection and control over execution.
 | `Checkpoint`        | `Checkpoint(label?)`             | Save current agent state for potential rollback.         |
 | `Rollback`          | `Rollback(target)`               | Revert to a checkpoint by label or step count.           |
 | `Reflect`           | `Reflect(process)`               | Meta-cognitive review of the agent's own approach.       |
-| `Cost`              | `Cost()`                         | Report estimated token/compute cost so far.              |
 | `Elapsed`           | `Elapsed()`                      | Wall-clock time since execution began (returns ms).      |
 | `Save`              | `Save(content, path?)`           | Write content to file at path, or stdout if no path.     |
 
@@ -1051,7 +1053,6 @@ Every operation executes within an implicit **context window**: the accumulated 
 |-----------------------|------------------------------------------------------------------|
 | `Timeout`             | Operation exceeds `<timeout=Ns>` or system default.              |
 | `DataUnavailable`     | External data source is unreachable or returns empty.            |
-| `LowConfidence`       | Confidence drops below a required threshold.                     |
 | `ValidationError`     | `Validate` or `assert` fails.                                   |
 | `PermissionDenied`    | Tool invocation exceeds declared permissions.                    |
 | `ToolNotFound`        | Requested MCP/Plugin is not available.                           |
@@ -1240,7 +1241,7 @@ if confidence > 0.8:
 elif confidence > 0.5:
     thesis := ELI5(refined) + Explain("key uncertainty areas")
 else:
-    thesis := Debate[3]("bull case vs bear case vs neutral")
+    thesis := Debate("bull case vs bear case vs neutral", count=3)
     thesis += Creative("what additional data would resolve uncertainty")
 
 fs:Write("analysis/nvda_report.md", thesis)<private>
@@ -1495,8 +1496,13 @@ The following macros are available in all Orchid environments without import:
 **Critique:** Critique, RedTeam, Steelman, DevilsAdvocate, Counterfactual, Validate
 **Synthesis:** Refine, Consensus, Debate, Synthesize, Reconcile, Prioritize
 **Communication:** ELI5, Formal, Analogize, Socratic, Narrate, Translate
+<<<<<<< HEAD
+**Generative:** Creative, Brainstorm, Abstract, Ground, Reframe, Generate
+**Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Elapsed
+=======
 **Generative:** Creative, Brainstorm, Abstract, Ground, Reframe
 **Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Cost, Elapsed, Save
+>>>>>>> origin/main
 
 ## Appendix C: Comparison with Existing Approaches
 

@@ -123,12 +123,12 @@ describe('ClaudeProvider', () => {
       }
     });
 
-    it('should respect _count for list operations', async () => {
+    it('should respect count for list operations', async () => {
       mockCreate.mockResolvedValue(
         mockResponse('["a", "b", "c", "d", "e"]'),
       );
 
-      const result = await provider.execute('Brainstorm', 'ideas', { _count: '3' }, []);
+      const result = await provider.execute('Brainstorm', 'ideas', { count: '3' }, []);
 
       expect(result.kind).toBe('list');
       if (result.kind === 'list') {
@@ -333,6 +333,30 @@ describe('ClaudeProvider', () => {
 
       const call = client.messages.create.mock.calls[0][0];
       expect(call.temperature).toBe(0.1); // Should override Creative's default 0.9
+    });
+  });
+
+  describe('generate()', () => {
+    it('should return Creative result for format=text', async () => {
+      mockCreate.mockResolvedValue(mockResponse('Generated text content'));
+
+      const result = await provider.generate('a short story', 'text', []);
+
+      expect(result.kind).toBe('string');
+      if (result.kind === 'string') expect(result.value).toBe('Generated text content');
+    });
+
+    it('should throw for format=image (unsupported)', async () => {
+      await expect(provider.generate('a dog', 'image', []))
+        .rejects.toThrow(/Generate\(format=image\) is not supported/);
+      await expect(provider.generate('a dog', 'image', []))
+        .rejects.toThrow(/MCP server or plugin/);
+    });
+
+    it('should throw for format=audio, video, document', async () => {
+      await expect(provider.generate('intro', 'audio', [])).rejects.toThrow(/not supported/);
+      await expect(provider.generate('clip', 'video', [])).rejects.toThrow(/not supported/);
+      await expect(provider.generate('report', 'document', [])).rejects.toThrow(/not supported/);
     });
   });
 });
