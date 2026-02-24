@@ -23,3 +23,7 @@ paper/*.aux
 paper/*.log
 paper/*.out
 paper/*.toc
+
+# VS Code extension build artifacts
+editors/vscode/*.vsix
+editors/vscode/icons/

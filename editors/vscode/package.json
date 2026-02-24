@@ -1,16 +1,26 @@
 {
-  "name": "orchid-lang",
+  "name": "orchid-dsl",
   "displayName": "Orchid Language",
-  "description": "Syntax highlighting for the Orchid cognitive choreography language",
+  "description": "Syntax highlighting for Orchid (.orch) - a cognitive choreography language for LLM agent orchestration",
   "version": "0.1.0",
-  "publisher": "orchid-lang",
+  "publisher": "orchid-dsl",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/orchid-dsl/orchid.git"
+    "url": "https://github.com/Orchid-DSL/orchid"
   },
-  "categories": ["Programming Languages"],
-  "keywords": ["orchid", "ai", "llm", "agent", "orchestration", "mcp"],
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "orchid",
+    "orch",
+    "llm",
+    "agent",
+    "orchestration",
+    "dsl",
+    "ai"
+  ],
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -20,11 +30,7 @@
         "id": "orchid",
         "aliases": ["Orchid", "orchid"],
         "extensions": [".orch"],
-        "configuration": "./language-configuration.json",
-        "icon": {
-          "light": "./icon.png",
-          "dark": "./icon.png"
-        }
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [

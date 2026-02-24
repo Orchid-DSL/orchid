@@ -1,44 +1,55 @@
 # Orchid Language for VS Code
 
-Syntax highlighting and language support for [Orchid](https://github.com/orchid-dsl/orchid), the cognitive choreography language for LLM agent orchestration.
+Syntax highlighting and editor support for [Orchid](https://github.com/Orchid-DSL/orchid) (`.orch` files) -- a cognitive choreography language for LLM agent orchestration.
 
 ## Features
 
-- Syntax highlighting for all Orchid constructs
-- Distinct coloring for reasoning macro categories (analysis, critique, synthesis, communication, generative)
-- Highlighting for meta operations, MCP tool calls, tags, string interpolation
-- Auto-closing pairs and bracket matching
-- Indentation rules for Orchid's Python-like block structure
-- Code folding
+- Syntax highlighting for all Orchid constructs:
+  - **Reasoning macros** (`CoT`, `RedTeam`, `ELI5`, `Debate`, etc.)
+  - **Meta operations** (`Confidence`, `Trace`, `Checkpoint`, etc.)
+  - **Control flow** (`if`/`elif`/`else`, `for`, `while`, `until`, `fork`, `try`/`except`)
+  - **Tags** (`<deep>`, `<retry=3>`, `<private>`, etc.)
+  - **Directives** (`@orchid`, `@name`, `@requires`)
+  - **MCP/Plugin tool calls** (`filesystem:read_text_file(...)`)
+  - **String interpolation** (`"$variable"`, `"${expression}"`)
+  - **Agent and macro definitions**
+  - **Atomic blocks** (`### ... ###`)
+- Auto-indentation for blocks
+- Bracket matching and auto-closing
+- Comment toggling (`#`)
 
-## Install
+## Installation
 
-### From source (development)
+### From VSIX (local install)
 
 ```bash
 cd editors/vscode
-npm install -g @vscode/vsce
-vsce package
-code --install-extension orchid-lang-0.1.0.vsix
+npx @vscode/vsce package
+code --install-extension orchid-0.1.0.vsix
 ```
 
-### Manual (symlink)
+### From source (development)
 
-```bash
-ln -s $(pwd)/editors/vscode ~/.vscode/extensions/orchid-lang
+1. Open the `editors/vscode` folder in VS Code
+2. Press `F5` to launch the Extension Development Host
+3. Open any `.orch` file to see highlighting
+
+## About Orchid
+
+Orchid is a domain-specific language where reasoning is the primitive. Instead of writing code that calls an LLM API, you write scripts that describe how an agent should think.
+
+```orchid
+sources := fork:
+    academic: Search("quantum computing breakthroughs")
+    industry: Search("quantum computing applications")
+
+vetted := CoVe(sources)
+analysis := CoT(vetted)<deep>
+
+if Confidence(analysis) > 0.7:
+    Formal(analysis)<cite>
+else:
+    ELI5(analysis) + Explain("uncertainty areas")
 ```
 
-Then reload VS Code.
-
-## Syntax Categories
-
-| Category | Scope | Examples |
-|----------|-------|---------|
-| Reasoning macros | `entity.name.function.reasoning.*` | `CoT`, `RedTeam`, `ELI5`, `Debate` |
-| Meta operations | `support.function.meta` | `Confidence`, `Checkpoint`, `Trace` |
-| Utility builtins | `support.function.builtin` | `Log`, `Error`, `len` |
-| Keywords | `keyword.control.*` | `if`, `fork`, `agent`, `import` |
-| MCP/Plugin calls | `entity.name.namespace` + `entity.name.function.tool` | `filesystem:read_text_file` |
-| Tags | `meta.tag` | `<deep>`, `<retry=3>` |
-| Metadata | `keyword.control.directive` | `@orchid`, `@name`, `@requires` |
-| String interpolation | `variable.other.interpolated` | `$var`, `${expr}` |
+Learn more at https://github.com/Orchid-DSL/orchid

@@ -3,34 +3,35 @@
     "lineComment": "#"
   },
   "brackets": [
-    ["(", ")"],
-    ["[", "]"],
     ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
     ["<", ">"]
   ],
   "autoClosingPairs": [
-    { "open": "(", "close": ")" },
-    { "open": "[", "close": "]" },
     { "open": "{", "close": "}" },
-    { "open": "<", "close": ">" },
-    { "open": "\"", "close": "\"", "notIn": ["string"] }
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "<", "close": ">", "notIn": ["string", "comment"] },
+    { "open": "\"", "close": "\"", "notIn": ["string"] },
+    { "open": "\"\"\"", "close": "\"\"\"", "notIn": ["string"] }
   ],
   "surroundingPairs": [
-    ["(", ")"],
-    ["[", "]"],
-    ["{", "}"],
-    ["<", ">"],
-    ["\"", "\""]
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "<", "close": ">" },
+    { "open": "\"", "close": "\"" }
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(if|elif|else|for|while|until|try|except|finally|fork|agent|macro|permissions|on|listen)\\b.*:\\s*(#.*)?$",
+    "increaseIndentPattern": "^\\s*(if|elif|else|for|while|until|try|except|finally|agent|macro|fork|on|permissions)\\b.*:\\s*(#.*)?$",
     "decreaseIndentPattern": "^\\s*(elif|else|except|finally)\\b"
   },
   "folding": {
-    "offSide": true,
     "markers": {
-      "start": "^\\s*###",
-      "end": "^\\s*###"
+      "start": "^\\s*###\\s*$",
+      "end": "^\\s*###\\s*$"
     }
-  }
+  },
+  "wordPattern": "[a-zA-Z_]\\w*"
 }
