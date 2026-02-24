@@ -14,3 +14,12 @@ dist/
 
 # Test
 coverage/
+
+# Paper internals (keep .tex and .md, ignore working notes and build artifacts)
+paper/ARXIV-NOTES.md
+paper/OUTLINE.md
+paper/*.pdf
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.toc
