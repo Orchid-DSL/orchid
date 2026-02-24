@@ -37,11 +37,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/mjkoogle/orchid.git"
+    "url": "https://github.com/orchid-dsl/orchid.git"
   },
-  "homepage": "https://github.com/mjkoogle/orchid#readme",
+  "homepage": "https://github.com/orchid-dsl/orchid#readme",
   "bugs": {
-    "url": "https://github.com/mjkoogle/orchid/issues"
+    "url": "https://github.com/orchid-dsl/orchid/issues"
   },
   "engines": {
     "node": ">=18"

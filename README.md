@@ -38,7 +38,7 @@ orchid examples/hello_world.orch
 ```
 ### From source
 ```bash
-git clone https://github.com/mjkoogle/orchid.git
+git clone https://github.com/orchid-dsl/orchid.git
 cd orchid && npm install && npm run build
 node dist/cli.js examples/hello_world.orch
 ```

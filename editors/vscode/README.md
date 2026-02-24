@@ -1,6 +1,6 @@
 # Orchid Language for VS Code
 
-Syntax highlighting and language support for [Orchid](https://github.com/mjkoogle/orchid), the cognitive choreography language for LLM agent orchestration.
+Syntax highlighting and language support for [Orchid](https://github.com/orchid-dsl/orchid), the cognitive choreography language for LLM agent orchestration.
 
 ## Features
 
