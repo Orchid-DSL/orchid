@@ -40,7 +40,7 @@ export type PluginOperation = (
  *
  * Example plugin:
  * ```ts
- * import { OrchidPlugin, orchidString } from 'orchid-lang';
+ * import { OrchidPlugin, orchidString } from '@orchid-dsl/orchid';
  *
  * const plugin: OrchidPlugin = {
  *   name: 'sentiment',

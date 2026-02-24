@@ -33,7 +33,7 @@ Read it aloud. You don't need to be a programmer to understand what this agent w
 
 ### Install from npm
 ```bash
-npm install -g orchid-lang
+npm install -g @orchid-dsl/orchid
 orchid examples/hello_world.orch
 ```
 ### From source

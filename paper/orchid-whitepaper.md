@@ -8,7 +8,7 @@
 
 ## Abstract
 
-As large language model (LLM) agents grow more capable, the tools we use to orchestrate their behavior have not kept pace. Today's approaches fall into two camps: raw prompt engineering, which is fragile and non-composable, and general-purpose programming frameworks, which bury cognitive intent under API boilerplate. We present Orchid, a domain-specific language (DSL) in which reasoning is the primitive. Rather than writing code that calls an LLM API, an Orchid script describes *how an agent should think* -- using named reasoning strategies, confidence-aware control flow, parallel fork execution, and first-class tool integration via the Model Context Protocol (MCP). The language is human-readable by design: a non-programmer can read an Orchid script and understand the agent's intended behavior. We describe the language's design principles, its 30+ built-in reasoning macros, its hybrid confidence model, and its reference interpreter implementation. Orchid is available today as an open-source npm package (`orchid-lang`) with over 440 passing tests, and its specification is published under the MIT license.
+As large language model (LLM) agents grow more capable, the tools we use to orchestrate their behavior have not kept pace. Today's approaches fall into two camps: raw prompt engineering, which is fragile and non-composable, and general-purpose programming frameworks, which bury cognitive intent under API boilerplate. We present Orchid, a domain-specific language (DSL) in which reasoning is the primitive. Rather than writing code that calls an LLM API, an Orchid script describes *how an agent should think* -- using named reasoning strategies, confidence-aware control flow, parallel fork execution, and first-class tool integration via the Model Context Protocol (MCP). The language is human-readable by design: a non-programmer can read an Orchid script and understand the agent's intended behavior. We describe the language's design principles, its 30+ built-in reasoning macros, its hybrid confidence model, and its reference interpreter implementation. Orchid is available today as an open-source npm package (`@orchid-dsl/orchid`) with over 440 passing tests, and its specification is published under the MIT license.
 
 ---
 
@@ -53,7 +53,7 @@ Orchid occupies a specific point in the design space. It sits between natural la
 
 5. **Radical readability.** Every design decision in Orchid prioritizes human comprehension. The syntax borrows familiar elements -- Python-style indentation, the `:=` walrus operator, `#` comments -- and combines them with domain-specific constructs that read like descriptions of thought rather than instructions to a machine.
 
-The reference interpreter is implemented in TypeScript, passes over 440 tests across 13 test suites, and is published on npm as `orchid-lang`. The full language specification, including an EBNF grammar, is published under the MIT license.
+The reference interpreter is implemented in TypeScript, passes over 440 tests across 13 test suites, and is published on npm as `@orchid-dsl/orchid`. The full language specification, including an EBNF grammar, is published under the MIT license.
 
 ---
 
@@ -359,10 +359,10 @@ New providers (OpenAI, Gemini, local models) can be added by implementing the sa
 
 The reference interpreter is implemented in TypeScript (targeting ES2022, compiled to CommonJS). It consists of approximately 5,000 lines of application code and 5,000 lines of tests across 13 test suites with over 440 passing tests covering the lexer, parser, runtime, Claude integration, MCP management, configuration, plugins, confidence tracking, and end-to-end CLI behavior.
 
-The interpreter is published on npm as `orchid-lang` and can be installed globally:
+The interpreter is published on npm as `@orchid-dsl/orchid` and can be installed globally:
 
 ```bash
-npm install -g orchid-lang
+npm install -g @orchid-dsl/orchid
 orchid examples/hello_world.orch
 ```
 
@@ -579,7 +579,7 @@ The ecosystem is young. There is no syntax highlighting, no language server, no 
 
 Several directions for future development are planned or under active consideration.
 
-**Python module.** The largest community working with LLM agents today uses Python. A Python package (`orchid-lang` on PyPI) that provides the same `parse()` and `execute()` API as the Node.js package would substantially expand Orchid's reach. This is a near-term priority.
+**Python module.** The largest community working with LLM agents today uses Python. A Python package (`orchid-dsl` on PyPI) that provides the same `parse()` and `execute()` API as the Node.js package would substantially expand Orchid's reach. This is a near-term priority.
 
 **Additional LLM providers.** The provider interface is designed for extensibility. Implementations for OpenAI, Google Gemini, and local models (via Ollama or similar) are planned.
 
@@ -599,7 +599,7 @@ Several directions for future development are planned or under active considerat
 
 The central claim of this paper is straightforward: reasoning deserves to be a first-class language primitive. When we write `CoT("analyze trends")<deep>`, we are not calling a function -- we are naming a way of thinking and specifying how thoroughly it should be applied. This distinction, between orchestrating computation and choreographing cognition, is what makes Orchid different from existing approaches.
 
-The language is available today. The npm package (`orchid-lang`) provides a complete interpreter with MCP tool integration, parallel fork execution, a hybrid confidence model, and support for the Anthropic Claude API. The full specification, including a formal EBNF grammar, is published under the MIT license. A Python package is planned.
+The language is available today. The npm package (`@orchid-dsl/orchid`) provides a complete interpreter with MCP tool integration, parallel fork execution, a hybrid confidence model, and support for the Anthropic Claude API. The full specification, including a formal EBNF grammar, is published under the MIT license. A Python package is planned.
 
 We built Orchid because we needed it. The experience of writing agent workflows in Python, buried under API boilerplate and retry loops, convinced us that the problem was not the framework but the medium. A dedicated language -- small enough to learn in an afternoon, expressive enough for production workflows, and readable enough to share with non-programmers -- seemed like a gap worth filling.
 

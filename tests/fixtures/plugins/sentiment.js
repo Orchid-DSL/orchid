@@ -3,7 +3,7 @@
  * Demonstrates the OrchidPlugin interface.
  *
  * Self-contained: constructs OrchidValue objects directly.
- * Real plugins would import from 'orchid-lang'.
+ * Real plugins would import from '@orchid-dsl/orchid'.
  */
 
 function orchidString(value) { return { kind: 'string', value }; }
