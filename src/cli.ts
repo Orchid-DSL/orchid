@@ -107,7 +107,12 @@ function createProvider(args: string[]): OrchidProvider {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
         console.error('Error: ANTHROPIC_API_KEY environment variable is required for Claude provider.');
-        console.error('Set it with: export ANTHROPIC_API_KEY=your-key-here');
+        if (process.platform === 'win32') {
+          console.error('Set it with: $env:ANTHROPIC_API_KEY = "your-key-here"');
+          console.error('Or permanently: [System.Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "your-key-here", "User")');
+        } else {
+          console.error('Set it with: export ANTHROPIC_API_KEY=your-key-here');
+        }
         process.exit(1);
       }
       provider = new ClaudeProvider({

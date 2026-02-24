@@ -4,6 +4,8 @@
   "description": "Syntax highlighting for Orchid (.orch) - a cognitive choreography language for LLM agent orchestration",
   "version": "0.1.0",
   "publisher": "orchid-dsl",
+  "icon": "icon.png",
+  "main": "./extension.js",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,16 +23,50 @@
     "dsl",
     "ai"
   ],
+  "activationEvents": [
+    "onLanguage:orchid"
+  ],
   "engines": {
     "vscode": "^1.75.0"
   },
   "contributes": {
+    "commands": [
+      {
+        "command": "orchid-dsl.runFile",
+        "title": "Run Orchid File",
+        "icon": "$(play)"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "orchid-dsl.runFile",
+          "when": "resourceExtname == .orch",
+          "group": "navigation@-1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Orchid",
+      "properties": {
+        "orchid.provider": {
+          "type": "string",
+          "default": "claude",
+          "enum": ["console", "claude"],
+          "description": "LLM provider to use when running .orch files"
+        }
+      }
+    },
     "languages": [
       {
         "id": "orchid",
         "aliases": ["Orchid", "orchid"],
         "extensions": [".orch"],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        }
       }
     ],
     "grammars": [
