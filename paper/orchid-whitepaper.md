@@ -22,7 +22,7 @@ This paper introduces Orchid, a lightweight, composable language designed to clo
 
 Here is a complete Orchid script that researches a topic, verifies its findings, and produces a confidence-gated report:
 
-```python
+```orchid
 @orchid 0.1
 @name "Quick Research Brief"
 
@@ -105,7 +105,7 @@ Orchid is built on five principles, each reflecting a specific conviction about 
 
 Orchid's syntax is deliberately minimal. Line order implies execution order. Assignment uses the `:=` walrus operator (borrowed from Python), signaling that assignment is a naming of an agent's output rather than a traditional variable store:
 
-```python
+```orchid
 results := Search("climate policy 2024")
 summary := CoT("summarize $results")
 report  := Formal(summary)
@@ -113,7 +113,7 @@ report  := Formal(summary)
 
 String interpolation uses `$` for variable references, keeping prompts readable: `Search("$name quarterly earnings")`. The implicit context variable `_` holds the output of the most recent operation, enabling concise chains:
 
-```python
+```orchid
 Search("renewable energy trends")
 CoT("summarize key findings from: $_")
 CoVe
@@ -161,7 +161,7 @@ Orchid ships with over 30 built-in macros organized into six categories:
 
 Critically, macros are also user-definable. A user can create new macros that combine built-in operations into reusable reasoning patterns:
 
-```python
+```orchid
 macro ThreatModel(system)<pure>:
     surface := Decompose("attack surface of $system")
     threats := RedTeam(surface)
@@ -176,7 +176,7 @@ This macro can then be invoked like any built-in: `result := ThreatModel(spec)`.
 
 Tags are inline modifiers that change *how* an operation executes without changing *what* it does. They are appended with angle brackets:
 
-```python
+```orchid
 Search("topic")<deep, retry=3, timeout=30s>
 CoT("sensitive analysis")<private, verbose>
 ```
@@ -211,7 +211,7 @@ This blend means that even if an LLM reports high confidence, the runtime will t
 
 Confidence integrates naturally into control flow:
 
-```python
+```orchid
 if Confidence(analysis) > 0.8:
     Formal(analysis)
 elif Confidence(analysis) > 0.4:
@@ -222,7 +222,7 @@ else:
 
 The `until` loop provides goal-directed iteration gated on confidence or validation:
 
-```python
+```orchid
 until Confidence() > 0.8:
     Search("additional evidence")<append>
     Refine(analysis)
@@ -232,7 +232,7 @@ until Confidence() > 0.8:
 
 The `fork` construct runs multiple branches concurrently and collects results. Named branches produce a dict; indexed branches produce a list:
 
-```python
+```orchid
 data := fork:
     market: Search("EV market data")
     tech: Search("battery R&D breakthroughs")
@@ -243,7 +243,7 @@ report := Consensus(data)
 
 Fork also supports parallel map over a collection:
 
-```python
+```orchid
 findings := fork:
     for q in sub_questions:
         Search("$q") >> CoVe >> Extract(_, schema="claims_with_evidence")
@@ -257,7 +257,7 @@ Orchid distinguishes between **macros** (pure cognitive transforms with no side 
 
 Agents declare permissions explicitly and can communicate through a lightweight event system:
 
-```python
+```orchid
 agent Researcher(topic, depth="standard"):
     permissions:
         web: [search, fetch]
@@ -274,7 +274,7 @@ agent Researcher(topic, depth="standard"):
 
 Multi-agent pipelines compose naturally by calling agents as you would call macros:
 
-```python
+```orchid
 raw := Gatherer("CRISPR gene therapy 2024")
 insights := Analyst(raw)
 article := Writer(insights, tone="technical")
@@ -286,7 +286,7 @@ Agents communicate through four event primitives: `emit` (broadcast), `on` (regi
 
 Orchid connects to external tools through the Model Context Protocol (MCP) [6], a standard for LLM-to-tool communication. MCP servers provide tools for file systems, databases, web search, GitHub, and other services. Orchid scripts declare tool dependencies and call them through a consistent namespace syntax:
 
-```python
+```orchid
 @requires MCP("filesystem"), MCP("brave-search")
 
 Use MCP("filesystem") as fs
@@ -303,7 +303,7 @@ The runtime also supports a plugin system for in-process extensions. Plugins are
 
 Orchid provides structured error handling through `try`/`except`/`finally` blocks, with named error types (`Timeout`, `DataUnavailable`, `ValidationError`, `PermissionDenied`) that map to common agent failure modes:
 
-```python
+```orchid
 try:
     data := API:Fetch(endpoint)
     analysis := CoT(data)
@@ -320,13 +320,13 @@ Atomic blocks (delimited by `###`) provide transactional semantics: either all o
 
 Two additional features round out the syntax. The pipe operator `>>` passes the output of one operation as the input to the next, enabling concise chains:
 
-```python
+```orchid
 Search("topic") >> CoVe >> CoT >> ELI5
 ```
 
 Orchid also defines semantic arithmetic for string operands. The `+` operator performs LLM-powered synthesis (combining two texts intelligently), while `*` performs literal concatenation. Similarly, `-` performs semantic subtraction (rewriting to remove concepts) while `/` performs literal removal. This gives scripts a natural vocabulary for combining and manipulating text-based reasoning outputs:
 
-```python
+```orchid
 report := market_analysis + technical_analysis    # LLM synthesizes both
 accessible := report - "jargon and acronyms"      # LLM removes jargon
 ```
@@ -382,7 +382,7 @@ The introductory example from Section 1 is not a toy -- it is a complete, runnab
 
 Security threat modeling is a natural fit for Orchid's parallel reasoning capabilities. The following script reads a system's architecture, decomposes its attack surface, then runs six parallel `RedTeam` analyses (one per STRIDE category) before synthesizing and prioritizing the results:
 
-```python
+```orchid
 @orchid 0.1
 @name "Threat Model Generator"
 @requires MCP("filesystem")
@@ -416,7 +416,7 @@ This example highlights three features: custom macro definition for reusable pat
 
 Orchid's agent composition allows structuring complex workflows as pipelines of specialized agents:
 
-```python
+```orchid
 agent Gatherer(topic):
     permissions:
         web: [search]
@@ -455,7 +455,7 @@ Each agent has a clear responsibility, declares its permissions, and communicate
 
 The code review example shows Orchid interacting with GitHub via MCP, performing parallel multi-angle analysis, and using confidence to calibrate its output:
 
-```python
+```orchid
 @orchid 0.1
 @requires MCP("github")
 
@@ -488,7 +488,7 @@ This works because Orchid's macros have intuitive names (`CoT`, `ELI5`, `RedTeam
 
 To test this, we gave Google's Gemini model the Orchid language primer and the following script:
 
-```python
+```orchid
 # Search for a topic
 results := Search("latest breakthroughs in fusion energy")
 
