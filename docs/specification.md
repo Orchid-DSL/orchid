@@ -442,7 +442,23 @@ Reasoning macros are named cognitive operations that shape *how the agent reason
 
 **Operating on generated media.** The same reasoning macros (Critique, Refine, CoT, ELI5, etc.) accept **OrchidAsset** as input. When the first argument is an asset (e.g. a generated image), the runtime passes it to the provider as an attachment; the provider can then run vision/multimodal (e.g. Claude analyzing the image). Example: `cover := Generate("dog", format="image")` then `critique := Critique(cover)` or `Refine(cover, "focus on composition")` — the macro operates on the media itself, not just the prompt. Providers that support vision (e.g. Claude with image blocks) will receive the asset; others may fall back to a text description.
 
-### 5.6 Count Parameter
+### 5.6 Utility Macros
+
+| Macro              | Signature                     | Description                                             |
+|--------------------|-------------------------------|---------------------------------------------------------|
+| `Search`           | `Search(query)`               | Search for information on a topic.                      |
+| `Summarize`        | `Summarize(content)`          | Compress context into a summary.                        |
+
+### 5.7 Built-in Functions
+
+| Function           | Signature                     | Description                                             |
+|--------------------|-------------------------------|---------------------------------------------------------|
+| `Log`              | `Log(message)`                | Log a message to stderr.                                |
+| `Error`            | `Error(message)`              | Raise a runtime error.                                  |
+| `Save`             | `Save(content, path?)`        | Write content to file at path, or stdout if no path.    |
+| `len`              | `len(collection)`             | Return the length of a list, dict, or string.           |
+
+### 5.8 Count Parameter
 
 Several macros accept an optional `count=` named parameter controlling how many results, viewpoints, or iterations are produced.
 
@@ -472,7 +488,7 @@ Macros that support `count=`:
 | `Brainstorm` | 5           | Generate n distinct ideas or approaches.          |
 | `Refine`     | 1           | Run n iterative refinement passes.                |
 
-### 5.7 Custom Macro Definition
+### 5.9 Custom Macro Definition
 
 Macros extend the standard library with reusable, parameterized cognitive patterns. Tags can be applied at **definition time** (defaults for every invocation) or at **call site** (per-invocation override).
 
@@ -1364,7 +1380,9 @@ metadata       ::= '@' IDENTIFIER value NEWLINE
 
 statement      ::= assignment | operation | control | atomic_block
                   | agent_def | macro_def | import_stmt | use_stmt
-                  | emit_stmt | on_stmt | comment
+                  | emit_stmt | on_stmt | return_stmt | comment
+
+return_stmt    ::= 'return' expression?
 
 assignment     ::= (IDENTIFIER | destructure) ':=' expression
                  | IDENTIFIER '+=' expression
@@ -1384,7 +1402,7 @@ arith_expr     ::= unary_expr (('*' | '/' | '-') unary_expr)*
 unary_expr     ::= '-' unary_expr | postfix_expr
 postfix_expr   ::= primary ('.' IDENTIFIER | '(' args? ')' | '[' expression ']')*
 primary        ::= operation | IDENTIFIER | literal | '(' expression ')'
-                 | listen_expr | stream_expr
+                 | fork_expr | listen_expr | stream_expr
 
 operation      ::= IDENTIFIER count? '(' args? ')' tags?
                |   IDENTIFIER tags?
@@ -1496,13 +1514,10 @@ The following macros are available in all Orchid environments without import:
 **Critique:** Critique, RedTeam, Steelman, DevilsAdvocate, Counterfactual, Validate
 **Synthesis:** Refine, Consensus, Debate, Synthesize, Reconcile, Prioritize
 **Communication:** ELI5, Formal, Analogize, Socratic, Narrate, Translate
-<<<<<<< HEAD
 **Generative:** Creative, Brainstorm, Abstract, Ground, Reframe, Generate
 **Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Elapsed
-=======
-**Generative:** Creative, Brainstorm, Abstract, Ground, Reframe
-**Meta:** Explain, Confidence, Benchmark, Trace, Checkpoint, Rollback, Reflect, Cost, Elapsed, Save
->>>>>>> origin/main
+**Utility:** Search, Summarize
+**Built-in Functions:** Log, Error, Save, len
 
 ## Appendix C: Comparison with Existing Approaches
 

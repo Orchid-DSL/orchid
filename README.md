@@ -134,6 +134,10 @@ node dist/cli.js mcp install filesystem brave-search memory github
 | [`financial_analysis.orch`](examples/financial_analysis.orch) | brave-search, filesystem | Live news search, multi-angle stock analysis, adversarial review |
 | [`adaptive_tutor.orch`](examples/adaptive_tutor.orch) | memory | Assess understanding, build lesson plan, persist to knowledge graph |
 | [`code_review.orch`](examples/code_review.orch) | github | Fetch PR, multi-angle review (correctness, security, design, testing) |
+| [`multi_agent.orch`](examples/multi_agent.orch) | none | Multi-agent pipeline: Gatherer, Analyst, Writer with events |
+| [`parallel_map.orch`](examples/parallel_map.orch) | none | Fork-as-parallel-map over a list of topics |
+| [`error_handling.orch`](examples/error_handling.orch) | none | While loops, try/except, atomic blocks, checkpoint/rollback |
+| [`generate_demo.orch`](examples/generate_demo.orch) | none | Generate macro with multimedia and iteration |
 
 ## Project Structure
 
@@ -150,8 +154,8 @@ orchid/
 │       ├── mcp-manager.ts         # MCP server connections
 │       ├── mcp-registry.ts        # Built-in server catalog (12 servers)
 │       └── ...                    # Environment, values, config, plugins, etc.
-├── tests/                         # 12 test suites, 319+ tests
-├── examples/                      # 7 runnable .orch scripts
+├── tests/                         # 13 test suites, 470+ tests
+├── examples/                      # 11 runnable .orch scripts
 ├── docs/
 │   ├── specification.md           # Full language spec with EBNF grammar
 │   └── ARCHITECTURE.md            # Runtime architecture and data flow
@@ -188,7 +192,7 @@ Orchid v0.1.0 — the language design is stabilizing and the **reference interpr
 - Plugin system for JS/TS extensions
 - npm registry search for discovering MCP servers
 - Live terminal status spinner during execution
-- 319+ tests across 12 test suites
+- 470+ tests across 13 test suites
 
 **What's coming:** VS Code syntax highlighting, streaming responses, runtime benchmarks, more providers.
 
