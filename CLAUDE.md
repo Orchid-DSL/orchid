@@ -38,7 +38,7 @@ orchid/
 │       ├── plugin.ts                   # JS/TS plugin interface
 │       └── status.ts                   # Terminal spinner/status display
 ├── tests/                              # Jest test suites (13 files, ~5000 lines)
-├── examples/                           # .orch example scripts (8 files)
+├── examples/                           # .orch example scripts (11 files)
 ├── docs/
 │   └── specification.md                # Full language specification with EBNF grammar
 ├── dist/                               # Compiled JS output (git-ignored)
@@ -90,7 +90,7 @@ The runtime auto-connects to configured MCP servers on first use. Configuration 
 ```bash
 npm install              # install dependencies
 npm run build            # compile TypeScript → dist/
-npm test                 # run all 440+ tests (Jest)
+npm test                 # run all 470+ tests (Jest)
 npm run lint             # type-check without emitting
 ```
 
@@ -230,7 +230,6 @@ CoT("analysis")<$mode>                # dynamic tag resolution from variable
 - `ORCHID_PATH` env var is searched for shared import libraries (colon-separated directories)
 - Agent `permissions:` blocks are enforced at runtime (namespace and action-level)
 - `Save(content, path="file.txt")` writes to disk; `Save(content)` writes to stdout
-- `Cost()` returns actual token count from the provider (0 for ConsoleProvider)
 - `Benchmark()` returns a number (0.0–1.0); `Validate()` returns a boolean; `Elapsed()` returns milliseconds as a number
 - `Confidence()` uses a hybrid model: 50% provider score + 50% runtime signals (retries, errors, sources, CoVe, fork agreement)
 - `<backoff>` tag enables exponential delay between retries (e.g., `<retry=3, backoff>`)

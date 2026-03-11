@@ -8,7 +8,7 @@
 
 ## Abstract
 
-As large language model (LLM) agents grow more capable, the tools we use to orchestrate their behavior have not kept pace. Today's approaches fall into two camps: raw prompt engineering, which is fragile and non-composable, and general-purpose programming frameworks, which bury cognitive intent under API boilerplate. We present Orchid, a domain-specific language (DSL) in which reasoning is the primitive. Rather than writing code that calls an LLM API, an Orchid script describes *how an agent should think* -- using named reasoning strategies, confidence-aware control flow, parallel fork execution, and first-class tool integration via the Model Context Protocol (MCP). The language is human-readable by design: a non-programmer can read an Orchid script and understand the agent's intended behavior. We describe the language's design principles, its 30+ built-in reasoning macros, its hybrid confidence model, and its reference interpreter implementation. Orchid is available today as an open-source npm package (`@orchid-dsl/orchid`) with over 440 passing tests, and its specification is published under the MIT license.
+As large language model (LLM) agents grow more capable, the tools we use to orchestrate their behavior have not kept pace. Today's approaches fall into two camps: raw prompt engineering, which is fragile and non-composable, and general-purpose programming frameworks, which bury cognitive intent under API boilerplate. We present Orchid, a domain-specific language (DSL) in which reasoning is the primitive. Rather than writing code that calls an LLM API, an Orchid script describes *how an agent should think* -- using named reasoning strategies, confidence-aware control flow, parallel fork execution, and first-class tool integration via the Model Context Protocol (MCP). The language is human-readable by design: a non-programmer can read an Orchid script and understand the agent's intended behavior. We describe the language's design principles, its 30+ built-in reasoning macros, its hybrid confidence model, and its reference interpreter implementation. Orchid is available today as an open-source npm package (`@orchid-dsl/orchid`) with over 470 passing tests, and its specification is published under the MIT license.
 
 ---
 
@@ -357,7 +357,7 @@ New providers (OpenAI, Gemini, local models) can be added by implementing the sa
 
 ### 4.3 Current Status
 
-The reference interpreter is implemented in TypeScript (targeting ES2022, compiled to CommonJS). It consists of approximately 5,000 lines of application code and 5,000 lines of tests across 13 test suites with over 440 passing tests covering the lexer, parser, runtime, Claude integration, MCP management, configuration, plugins, confidence tracking, and end-to-end CLI behavior.
+The reference interpreter is implemented in TypeScript (targeting ES2022, compiled to CommonJS). It consists of approximately 5,000 lines of application code and 5,000 lines of tests across 13 test suites with over 470 passing tests covering the lexer, parser, runtime, Claude integration, MCP management, configuration, plugins, confidence tracking, and end-to-end CLI behavior.
 
 The interpreter is published on npm as `@orchid-dsl/orchid` and can be installed globally:
 
