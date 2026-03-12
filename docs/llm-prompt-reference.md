@@ -141,7 +141,6 @@ All macros take an optional string/context argument. Called without arguments, t
 - `Explain(step)` - Justify reasoning.
 - `Reflect(process)` - Meta-cognitive review of own approach.
 - `Trace(depth?)` - Emit execution history.
-- `Cost()` - Token/compute cost so far.
 - `Elapsed()` - Wall-clock milliseconds since execution began.
 - `Checkpoint(label?)` / `Rollback(target)` - Save/restore state.
 
